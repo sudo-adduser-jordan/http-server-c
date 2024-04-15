@@ -1,0 +1,25 @@
+
+curl -v -X GET http://localhost:4221/
+curl -i -X GET http://localhost:4221/echo/abc
+curl -v -X GET http://localhost:4221/echo/scooby/donkey-dooby
+curl -i -X GET http://localhost:4221/user-agent
+
+curl -v -X GET http://localhost:4221/vanilla/Coo-237
+curl -v -X GET http://localhost:4221/donkey/vanilla
+
+oha  http://localhost:4221 
+
+start line:     GET /index.html HTTP/1.1
+header:         Host: localhost:4221
+header:         User-Agent: curl/7.64.1
+
+http method:    GET 
+path:           /index.html 
+http version:   HTTP/1.1
+
+RESPONSE:
+HTTP/1.1 200 OK
+Content-Type: text/plain
+Content-Length: 3
+
+abc
