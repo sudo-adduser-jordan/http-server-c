@@ -62,8 +62,6 @@ typedef struct ThreadPool
 static volatile int threads_keepalive;
 static volatile int threads_on_hold;
 
-/* ========================== THREADPOOL ============================ */
-
 static int thread_init(ThreadPool *thread_pool, struct Thread **thread, int id);
 static void *thread_do(struct Thread *thread);
 static void thread_hold(int sig_id);
