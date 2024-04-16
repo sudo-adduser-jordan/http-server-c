@@ -52,22 +52,15 @@ typedef struct Response
 	char *body;
 } Response;
 
-void server_process_client(void *arg);
 int server_listen();
+void server_process_client(void *arg);
 
 void request_print(const struct Request *request);
 void request_scan(char *buffer, struct Request *request);
 
 void response_print(const struct Response *response);
 void response_scan(struct Response *response, struct Request *request);
-void response_send(char *buffer, int client_fd, struct Response *response);
-
-// void request_free(struct Request *request)
-// {
-// }
-// void response_free(struct Response *response)
-// {
-// }
+void response_send(char *buffer, int *client_fd, struct Response *response);
 
 void request_print(const struct Request *request)
 {
@@ -134,12 +127,12 @@ void response_scan(struct Response *response, struct Request *request)
 		response->content_type = CONTENT_TYPE_TEXT;
 		response->body = request->user_agent;
 
-		char *content_length;
-		sprintf(content_length,
-				CONTENT_LENGTH "%zd" CLRF CLRF,
-				strlen(request->user_agent));
+		// char *content_length;
+		// sprintf(content_length,
+		// 		CONTENT_LENGTH "%zd" CLRF CLRF,
+		// 		strlen(request->user_agent));
 
-		response->content_length = content_length;
+		// response->content_length = content_length;
 	}
 	else if (strstr(request->path, "/echo/") != NULL) // contains
 	{
@@ -149,11 +142,11 @@ void response_scan(struct Response *response, struct Request *request)
 		strremove(request->path, "/echo/");
 		response->body = request->path;
 
-		char *content_length;
-		sprintf(content_length,
-				CONTENT_LENGTH "%zd" CLRF CLRF,
-				strlen(request->body));
-		response->content_length = content_length;
+		// char *content_length;
+		// sprintf(content_length,
+		// 		CONTENT_LENGTH "%zd" CLRF CLRF,
+		// 		strlen(request->body));
+		// response->content_length = content_length;
 	}
 	else if (strcmp(request->path, "/") == 0)
 	{
@@ -171,11 +164,7 @@ void response_scan(struct Response *response, struct Request *request)
 	}
 }
 
-void resopnse_build()
-{
-}
-
-void response_send(char *buffer, int client_fd, struct Response *response)
+void response_send(char *buffer, int *client_fd, struct Response *response)
 {
 	sprintf(buffer, "%s%s%s%s",
 			response->status,
@@ -183,7 +172,7 @@ void response_send(char *buffer, int client_fd, struct Response *response)
 			response->content_length,
 			response->body);
 
-	ssize_t error = send(client_fd, buffer, strlen(buffer), 0);
+	ssize_t error = send((int)*client_fd, buffer, strlen(buffer), 0);
 	if (error == -1)
 	{
 		printf("Send failed: %s...\n", strerror(errno));
@@ -193,7 +182,6 @@ void response_send(char *buffer, int client_fd, struct Response *response)
 
 int server_listen()
 {
-	// CREATE NEW SOCKET
 	int server_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_fd == -1)
 	{
@@ -207,7 +195,6 @@ int server_listen()
 		return C_ERR;
 	}
 
-	// BIND TO THE NEW SOCKET
 	struct sockaddr_in serv_addr = {
 		.sin_family = AF_INET,
 		.sin_port = htons(PORT),
@@ -219,7 +206,6 @@ int server_listen()
 		return C_ERR;
 	}
 
-	// LISTEN TO SOCKET
 	int connection_backlog = 5;
 	if (listen(server_fd, connection_backlog) != 0)
 	{
@@ -232,16 +218,15 @@ int server_listen()
 
 void server_process_client(void *arg)
 {
-	int *client_fd = (uintptr_t)arg;
+	int client_fd = (uintptr_t)arg;
 	char response_buffer[RESPONSE_BUFFER_SIZE];
 	char request_buffer[REQEUST_BUFFER_SIZE];
 
-	if (recv((uintptr_t)arg, request_buffer, sizeof(request_buffer), 0) != -1)
+	if (recv(client_fd, request_buffer, sizeof(request_buffer), 0) != -1)
 	{
 		printf("Message received.\n");
 	}
-
-	printf(print_raw_string(request_buffer));
+	// printf(print_raw_string(request_buffer)); // fails oha test
 	printf("\n\n");
 
 	struct Request request;
@@ -251,11 +236,7 @@ void server_process_client(void *arg)
 	struct Response response;
 	response_scan(&response, &request);
 	response_print(&response);
-	response_send(response_buffer, client_fd, &response);
-
-	// free(&request);
-	// free(&response);
-	// close(arg);
+	response_send(response_buffer, &client_fd, &response);
 
 	close(client_fd);
 }
@@ -289,8 +270,6 @@ int main(int argc, char *argv[])
 	thread_pool_wait(thread_pool);
 	printf("Killing threadpool");
 	thread_pool_destroy(thread_pool);
-
-	// ClOSE SERVER SOCKET
 	close(server_fd);
 
 	return C_OK;
