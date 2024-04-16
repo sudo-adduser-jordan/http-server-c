@@ -11,6 +11,7 @@
 
 #include "utils.h"
 #include "tpool.h"
+#include "colors.h"
 #include "options.h"
 
 #define MAX_THREADS 4
@@ -64,13 +65,13 @@ void response_send(char *buffer, int *client_fd, struct Response *response);
 
 void request_print(const struct Request *request)
 {
-	printf("\nRequest\n");
-	printf("Method: %s\n", request->method ? request->method : "(not specified)");
-	printf("Path: %s\n", request->path ? request->path : "(not specified)");
-	printf("Host: %s\n", request->host ? request->host : "(not specified)");
-	printf("User-Agent: %s\n", request->user_agent ? request->user_agent : "(not specified)");
-	printf("Accept: %s\n", request->accept ? request->accept : "(not specified)");
-	printf("Body: %s\n", request->body ? request->body : "(not specified)");
+	printf(GREEN "\nRequest\n" RESET);
+	printf(YELLOW "Method: " RESET "%s\n", request->method ? request->method : "(not specified)");
+	printf(YELLOW "Path: " RESET "%s\n", request->path ? request->path : "(not specified)");
+	printf(YELLOW "Host: " RESET "%s\n", request->host ? request->host : "(not specified)");
+	printf(YELLOW "User-Agent: " RESET "%s\n", request->user_agent ? request->user_agent : "(not specified)");
+	printf(YELLOW "Accept: " RESET "%s\n", request->accept ? request->accept : "(not specified)");
+	printf(YELLOW "Body: " RESET "%s\n", request->body ? request->body : "(not specified)");
 }
 
 void request_scan(char *buffer, struct Request *request)
@@ -98,11 +99,11 @@ void request_scan(char *buffer, struct Request *request)
 
 void response_print(const struct Response *response)
 {
-	printf("\nResponse\n");
-	printf("Status: %s", response->status ? response->status : "(not specified)\n");
-	printf("Content-Type: %s", response->content_type ? response->content_type : "(not specified)\n");
-	printf("%s", response->content_length ? response->content_length : "Conetent-Length: (not specified)\n");
-	printf("Body: %s", response->body ? response->body : "(not specified)\n");
+	printf(GREEN "\nResponse\n" RESET);
+	printf(YELLOW "Status:" RESET "%s", response->status ? response->status : "(not specified)\n");
+	printf(YELLOW "Content-Type:" RESET " %s", response->content_type ? response->content_type : "(not specified)\n");
+	printf(YELLOW "%s" RESET, response->content_length ? response->content_length : "Conetent-Length: (not specified)\n");
+	printf(YELLOW "Body: " RESET "%s", response->body ? response->body : "(not specified)\n");
 }
 
 void response_scan(struct Response *response, struct Request *request)
@@ -175,9 +176,8 @@ void response_send(char *buffer, int *client_fd, struct Response *response)
 	ssize_t error = send((int)*client_fd, buffer, strlen(buffer), 0);
 	if (error == -1)
 	{
-		printf("Send failed: %s...\n", strerror(errno));
+		printf(RED "Send failed: %s...\n" RESET, strerror(errno));
 	}
-	printf("\nMessage sent\n");
 }
 
 int server_listen()
@@ -185,13 +185,13 @@ int server_listen()
 	int server_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_fd == -1)
 	{
-		printf("Socket creation failed: %s...\n", strerror(errno));
+		printf(RED "Socket creation failed: %s...\n" RESET, strerror(errno));
 		return C_ERR;
 	}
 	int reuse = 1;
 	if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
 	{
-		printf("SO_REUSEPORT failed: %s \n", strerror(errno));
+		printf(RED "SO_REUSEPORT failed: %s \n" RESET, strerror(errno));
 		return C_ERR;
 	}
 
@@ -202,14 +202,14 @@ int server_listen()
 	};
 	if (bind(server_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) != 0)
 	{
-		printf("Bind failed: %s \n", strerror(errno));
+		printf(RED "Bind failed: %s \n" RESET, strerror(errno));
 		return C_ERR;
 	}
 
 	int connection_backlog = 5;
 	if (listen(server_fd, connection_backlog) != 0)
 	{
-		printf("Listen failed: %s \n", strerror(errno));
+		printf(RED "Listen failed: %s \n" RESET, strerror(errno));
 		return C_ERR;
 	}
 
@@ -224,10 +224,10 @@ void server_process_client(void *arg)
 
 	if (recv(client_fd, request_buffer, sizeof(request_buffer), 0) != -1)
 	{
-		printf("Message received.\n");
+		printf(GREEN "Message received.\n" RESET);
 	}
 	// printf(print_raw_string(request_buffer)); // fails oha test
-	printf("\n\n");
+	// printf("\n\n");
 
 	struct Request request;
 	request_scan(request_buffer, &request);
@@ -246,10 +246,10 @@ int main(int argc, char *argv[])
 	setbuf(stdout, NULL);
 
 	threadpool thread_pool = thread_pool_init(MAX_THREADS);
-	printf("Thread pool created: 4 threads\n");
+	printf(GREEN "Thread pool created: 4 threads\n" RESET);
 
 	int server_fd = server_listen();
-	printf("Server listening...\n");
+	printf(CYAN "Server listening...\n" RESET);
 
 	for (;;)
 	{
@@ -258,18 +258,19 @@ int main(int argc, char *argv[])
 
 		client_addr_len = sizeof(client_addr);
 		int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
-		if (client_fd == FUNCTION_ERR)
+		if (client_fd != -1)
 		{
-			printf("Connection Accepted.\n");
+			printf(GREEN "Connection Accepted.\n" RESET);
 		}
 
 		thread_pool_add_work(thread_pool, server_process_client, (void *)(uintptr_t)client_fd);
 	}
 
-	printf("Waiting for thread pool work to complete...");
+	printf(YELLOW "Waiting for thread pool work to complete..." RESET);
 	thread_pool_wait(thread_pool);
-	printf("Killing threadpool");
+	printf(RED "Killing threadpool..." RESET);
 	thread_pool_destroy(thread_pool);
+	printf(RED "Closing server socket..." RESET);
 	close(server_fd);
 
 	return C_OK;
