@@ -268,13 +268,12 @@ static void *thread_do(struct Thread *thread)
 {
 
     /* Set thread name for profiling and debugging */
-    char thread_name[16] = {0};
-
+    // char thread_name[16] = {0};
     // snprintf(thread_name, 16, TOSTRING("THPOOL_THREAD_NAME") "-%d", thread->thread_id);
     // snprintf(thread_name, 16, TOSTRING(THPOOL_THREAD_NAME) "-%d", thread_p->id);
 
     /* Use prctl instead to prevent using _GNU_SOURCE flag and implicit declaration */
-    prctl(PR_SET_NAME, thread_name);
+    // prctl(PR_SET_NAME, thread_name);
 
     /* Assure all threads have been created before starting serving */
     ThreadPool *thread_pool = thread->thread_pool;
