@@ -8,18 +8,18 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <ctype.h>
 
 #include "utils.h"
 #include "tpool.h"
 #include "colors.h"
-#include "options.h"
 
 #define MAX_THREADS 4
 
 #define PORT 4221
 #define C_OK 0
 #define C_ERR 1
-#define FUNCTION_ERR -1
+#define FLAG_DIRECTORY "--directory"
 
 #define REQEUST_BUFFER_SIZE 4096
 #define RESPONSE_BUFFER_SIZE 4096
@@ -53,6 +53,8 @@ typedef struct Response
 	char *body;
 } Response;
 
+char *option_directory = NULL;
+
 int server_listen();
 void server_process_client(void *arg);
 
@@ -68,6 +70,7 @@ void request_print(const struct Request *request)
 	printf(GREEN "\nRequest\n" RESET);
 	printf(YELLOW "Method: " RESET "%s\n", request->method ? request->method : "(not specified)");
 	printf(YELLOW "Path: " RESET "%s\n", request->path ? request->path : "(not specified)");
+	printf(YELLOW "Version: " RESET "%s\n", request->version ? request->version : "(not specified)");
 	printf(YELLOW "Host: " RESET "%s\n", request->host ? request->host : "(not specified)");
 	printf(YELLOW "User-Agent: " RESET "%s\n", request->user_agent ? request->user_agent : "(not specified)");
 	printf(YELLOW "Accept: " RESET "%s\n", request->accept ? request->accept : "(not specified)");
@@ -76,25 +79,50 @@ void request_print(const struct Request *request)
 
 void request_scan(char *buffer, struct Request *request)
 {
-	strremove(buffer, "Host:");
-	strremove(buffer, "User-Agent: ");
-	strremove(buffer, "Accept-Encoding: gzip");
-	strremove(buffer, "Accept: ");
 
-	char *tokens;
-	tokens = strtok(buffer, " \r\n");
-	request->method = tokens;
-	tokens = strtok(NULL, " \r\n");
-	request->path = tokens;
-	tokens = strtok(NULL, " \r\n");
-	request->host = tokens;
-	tokens = strtok(NULL, " \r\n");
-	request->user_agent = tokens;
-	tokens = strtok(NULL, " \r\n");
-	request->accept = tokens;
-	tokens = strtok(NULL, " \r\n");
-	request->body = tokens;
-	tokens = strtok(NULL, " \r\n");
+	printf(print_raw_string(buffer));
+	printf("\n");
+
+	char *token = strtok(buffer, "\r\n");
+
+	char *method = token;
+	printf("	%s\n", method);
+	printf("hit\n");
+
+	while (token != NULL)
+	{
+		for (int i = 0; token[i]; i++) // flatten
+		{
+			token[i] = tolower(token[i]);
+		}
+
+		if (strstr(token, "accept:") != NULL)
+		{
+			printf("hit\n");
+		}
+		else if (strstr(token, "accept-encoding:") != NULL)
+		{
+			printf("hit\n");
+		}
+		else if (strstr(token, "user-agent:") != NULL)
+		{
+			printf("hit\n");
+		}
+		else if (strstr(token, "host:") != NULL)
+		{
+			printf("hit\n");
+		}
+		else if (strstr(token, "content-length:") != NULL)
+		{
+			printf("hit\n");
+		}
+
+		token = strtok(NULL, "\r\n");
+		if (token != NULL)
+		{
+			printf("	%s\n", token);
+		}
+	}
 }
 
 void response_print(const struct Response *response)
@@ -111,16 +139,6 @@ void response_scan(struct Response *response, struct Request *request)
 
 	if (strstr(request->path, "/files") != NULL)
 	{
-
-		// We pass in absolute path to your program using the-- directory flag
-
-		// check if file exists
-		// return200 or 400
-		// strremove(request->path, "/files");
-		// response->status = STATUS_OK;
-		// response->content_type = CONTENT_TYPE_FILE;
-		// response->content_length = NULL;
-		// response->body = NULL;
 	}
 	else if (strstr(request->path, "/user-agent") != NULL)
 	{
@@ -128,14 +146,14 @@ void response_scan(struct Response *response, struct Request *request)
 		response->content_type = CONTENT_TYPE_TEXT;
 		response->body = request->user_agent;
 
-		// char *content_length;
+		// char content_length[100];
 		// sprintf(content_length,
 		// 		CONTENT_LENGTH "%zd" CLRF CLRF,
-		// 		strlen(request->user_agent));
+		// 		strlen(response->body));
 
 		// response->content_length = content_length;
 	}
-	else if (strstr(request->path, "/echo/") != NULL) // contains
+	else if (strstr(request->path, "/echo/") != NULL)
 	{
 		response->status = STATUS_OK;
 		response->content_type = CONTENT_TYPE_TEXT;
@@ -143,10 +161,11 @@ void response_scan(struct Response *response, struct Request *request)
 		strremove(request->path, "/echo/");
 		response->body = request->path;
 
-		// char *content_length;
+		// char content_length[100];
 		// sprintf(content_length,
 		// 		CONTENT_LENGTH "%zd" CLRF CLRF,
-		// 		strlen(request->body));
+		// 		strlen(response->body));
+
 		// response->content_length = content_length;
 	}
 	else if (strcmp(request->path, "/") == 0)
@@ -219,30 +238,35 @@ int server_listen()
 void server_process_client(void *arg)
 {
 	int client_fd = (uintptr_t)arg;
-	char response_buffer[RESPONSE_BUFFER_SIZE];
+	// char response_buffer[RESPONSE_BUFFER_SIZE];
 	char request_buffer[REQEUST_BUFFER_SIZE];
 
 	if (recv(client_fd, request_buffer, sizeof(request_buffer), 0) != -1)
 	{
 		printf(GREEN "Message received.\n" RESET);
 	}
-	// printf(print_raw_string(request_buffer)); // fails oha test
+	// printf(print_raw_string(request_buffer));
 	// printf("\n\n");
 
 	struct Request request;
 	request_scan(request_buffer, &request);
-	request_print(&request);
+	// request_print(&request);
 
-	struct Response response;
-	response_scan(&response, &request);
-	response_print(&response);
-	response_send(response_buffer, &client_fd, &response);
+	// struct Response response;
+	// response_scan(&response, &request);
+	// response_print(&response);
+	// response_send(response_buffer, &client_fd, &response);
 
 	close(client_fd);
 }
 
 int main(int argc, char *argv[])
 {
+	if (strcmp(argv[1], FLAG_DIRECTORY) == 0)
+	{
+		option_directory = argv[2];
+	}
+
 	setbuf(stdout, NULL);
 
 	threadpool thread_pool = thread_pool_init(MAX_THREADS);

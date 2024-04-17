@@ -1,7 +1,8 @@
 build:
 	mkdir -p bin
 	gcc app/*.c -o bin/http-server.exe -Wall
-	./bin/http-server.exe
+	./bin/http-server.exe --directory files
+	# ./bin/http-server.exe
 
 tpool:
 	mkdir -p bin
