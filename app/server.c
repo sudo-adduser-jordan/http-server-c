@@ -36,12 +36,15 @@
 
 struct Request
 {
+	char *url;
 	char *method;
 	char *path;
 	char *version;
+	char *accept;
+	char *accept_encoding;
 	char *host;
 	char *user_agent;
-	char *accept;
+	char *content_length;
 	char *body;
 } Request;
 
@@ -59,79 +62,108 @@ int server_listen();
 void server_process_client(void *arg);
 
 void request_print(const struct Request *request);
+void request_free(struct Request *request);
 void request_scan(char *buffer, struct Request *request);
 
 void response_print(const struct Response *response);
 void response_scan(struct Response *response, struct Request *request);
 void response_send(char *buffer, int *client_fd, struct Response *response);
 
+void request_free(struct Request *request)
+{
+	free(request->url);
+	free(request->method);
+	free(request->path);
+	free(request->version);
+	free(request->accept);
+	free(request->accept_encoding);
+	free(request->host);
+	free(request->user_agent);
+	free(request->content_length);
+	free(request->body);
+
+	free(request);
+}
+
 void request_print(const struct Request *request)
 {
-	printf(GREEN "\nRequest\n" RESET);
-	printf(YELLOW "Method: " RESET "%s\n", request->method ? request->method : "(not specified)");
-	printf(YELLOW "Path: " RESET "%s\n", request->path ? request->path : "(not specified)");
-	printf(YELLOW "Version: " RESET "%s\n", request->version ? request->version : "(not specified)");
-	printf(YELLOW "Host: " RESET "%s\n", request->host ? request->host : "(not specified)");
-	printf(YELLOW "User-Agent: " RESET "%s\n", request->user_agent ? request->user_agent : "(not specified)");
-	printf(YELLOW "Accept: " RESET "%s\n", request->accept ? request->accept : "(not specified)");
-	printf(YELLOW "Body: " RESET "%s\n", request->body ? request->body : "(not specified)");
+	printf(YELLOW "\nRequest\n" RESET);
+	printf("%s\n", request->url ? request->url : "(not specified)");
+	printf("%s\n", request->accept ? request->accept : "(not specified)");
+	printf("%s\n", request->accept_encoding ? request->accept_encoding : "(not specified)");
+	printf("%s\n", request->host ? request->host : "(not specified)");
+	printf("%s\n", request->user_agent ? request->user_agent : "(not specified)");
+	printf("%s\n", request->content_length ? request->content_length : "(not specified)");
+	printf("%s\n", request->body ? request->body : "(not specified)");
+
+	printf(YELLOW "\Method\n" RESET);
+	printf("%s\n", request->method ? request->method : "(not specified)");
+	printf("%s\n", request->path ? request->path : "(not specified)");
+	printf("%s\n", request->version ? request->version : "(not specified)");
 }
 
 void request_scan(char *buffer, struct Request *request)
 {
 
-	printf(print_raw_string(buffer));
-	printf("\n");
-
 	char *token = strtok(buffer, "\r\n");
+	request->url = token;
 
-	char *method = token;
-	printf("	%s\n", method);
-	printf("hit\n");
-
+	token = strtok(NULL, "\r\n");
 	while (token != NULL)
 	{
-		for (int i = 0; token[i]; i++) // flatten
+
+		if (strstr(token, ":") == NULL)
 		{
-			token[i] = tolower(token[i]);
+			request->body = token;
+		}
+		else
+		{
+			for (int i = 0; token[i]; i++) // flatten
+			{
+				token[i] = tolower(token[i]);
+			}
 		}
 
 		if (strstr(token, "accept:") != NULL)
 		{
-			printf("hit\n");
+			request->accept = token;
 		}
 		else if (strstr(token, "accept-encoding:") != NULL)
 		{
-			printf("hit\n");
+			request->accept_encoding = token;
 		}
 		else if (strstr(token, "user-agent:") != NULL)
 		{
-			printf("hit\n");
+			request->user_agent = token;
 		}
 		else if (strstr(token, "host:") != NULL)
 		{
-			printf("hit\n");
+			request->host = token;
 		}
 		else if (strstr(token, "content-length:") != NULL)
 		{
-			printf("hit\n");
+			request->content_length = token;
 		}
 
 		token = strtok(NULL, "\r\n");
-		if (token != NULL)
-		{
-			printf("	%s\n", token);
-		}
 	}
+
+	token = strtok(request->url, " ");
+	request->method = token;
+	token = strtok(NULL, " ");
+	request->path = token;
+	token = strtok(NULL, " ");
+	request->version = token;
 }
 
 void response_print(const struct Response *response)
 {
 	printf(GREEN "\nResponse\n" RESET);
-	printf(YELLOW "Status:" RESET "%s", response->status ? response->status : "(not specified)\n");
-	printf(YELLOW "Content-Type:" RESET " %s", response->content_type ? response->content_type : "(not specified)\n");
-	printf(YELLOW "%s" RESET, response->content_length ? response->content_length : "Conetent-Length: (not specified)\n");
-	printf(YELLOW "Body: " RESET "%s", response->body ? response->body : "(not specified)\n");
+
+	printf("Status: %s", response->status ? response->status : "(not specified)\n");
+	printf("Content-Type:  %s", response->content_type ? response->content_type : "(not specified)\n");
+	printf("Conetent-Length: %s", response->content_length ? response->content_length : "(not specified)\n");
+	printf("Body:  %s", response->body ? response->body : "(not specified)\n");
 }
 
 void response_scan(struct Response *response, struct Request *request)
@@ -144,14 +176,16 @@ void response_scan(struct Response *response, struct Request *request)
 	{
 		response->status = STATUS_OK;
 		response->content_type = CONTENT_TYPE_TEXT;
-		response->body = request->user_agent;
 
-		// char content_length[100];
-		// sprintf(content_length,
-		// 		CONTENT_LENGTH "%zd" CLRF CLRF,
-		// 		strlen(response->body));
+		char *token = strtok(request->user_agent, ":");
+		response->body = strtok(NULL, " ");
 
-		// response->content_length = content_length;
+		char content_length[100];
+		sprintf(content_length,
+				CONTENT_LENGTH "%zd" CLRF CLRF,
+				strlen(response->body));
+
+		response->content_length = content_length;
 	}
 	else if (strstr(request->path, "/echo/") != NULL)
 	{
@@ -238,24 +272,23 @@ int server_listen()
 void server_process_client(void *arg)
 {
 	int client_fd = (uintptr_t)arg;
-	// char response_buffer[RESPONSE_BUFFER_SIZE];
+	char response_buffer[RESPONSE_BUFFER_SIZE];
 	char request_buffer[REQEUST_BUFFER_SIZE];
 
 	if (recv(client_fd, request_buffer, sizeof(request_buffer), 0) != -1)
 	{
 		printf(GREEN "Message received.\n" RESET);
 	}
-	// printf(print_raw_string(request_buffer));
-	// printf("\n\n");
+	// printf(YELLOW "Raw Request: " RESET "\n%s\n", print_raw_string(request_buffer)); // can throw mem error
 
 	struct Request request;
 	request_scan(request_buffer, &request);
-	// request_print(&request);
+	request_print(&request);
 
-	// struct Response response;
-	// response_scan(&response, &request);
-	// response_print(&response);
-	// response_send(response_buffer, &client_fd, &response);
+	struct Response response;
+	response_scan(&response, &request);
+	response_print(&response);
+	response_send(response_buffer, &client_fd, &response);
 
 	close(client_fd);
 }
