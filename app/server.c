@@ -267,7 +267,7 @@ void server_process_client(void *arg)
 	close(client_fd);
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char *argv[]) // verify the stack is overflowing because the job queue overflows the stack
 {
 	if (strcmp(argv[1], FLAG_DIRECTORY) == 0)
 	{
