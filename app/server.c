@@ -96,7 +96,7 @@ void request_print(const struct Request *request)
 	printf("%s\n", request->content_length ? request->content_length : "(not specified)");
 	printf("%s\n", request->body ? request->body : "(not specified)");
 
-	printf(YELLOW "\Method\n" RESET);
+	printf(YELLOW "\nMethod\n" RESET);
 	printf("%s\n", request->method ? request->method : "(not specified)");
 	printf("%s\n", request->path ? request->path : "(not specified)");
 	printf("%s\n", request->version ? request->version : "(not specified)");
@@ -177,15 +177,15 @@ void response_scan(struct Response *response, struct Request *request)
 		response->status = STATUS_OK;
 		response->content_type = CONTENT_TYPE_TEXT;
 
-		char *token = strtok(request->user_agent, ":");
-		response->body = strtok(NULL, " ");
+		// char *token = strtok(request->user_agent, ":");
+		// response->body = strtok(NULL, " ");
 
-		char content_length[100];
-		sprintf(content_length,
-				CONTENT_LENGTH "%zd" CLRF CLRF,
-				strlen(response->body));
+		// char content_length[100];
+		// sprintf(content_length,
+		// 		CONTENT_LENGTH "%zd" CLRF CLRF,
+		// 		strlen(response->body));
 
-		response->content_length = content_length;
+		// response->content_length = content_length;
 	}
 	else if (strstr(request->path, "/echo/") != NULL)
 	{
@@ -283,11 +283,11 @@ void server_process_client(void *arg)
 
 	struct Request request;
 	request_scan(request_buffer, &request);
-	request_print(&request);
+	// request_print(&request); // performance hit
 
 	struct Response response;
 	response_scan(&response, &request);
-	response_print(&response);
+	// response_print(&response); // performance hit
 	response_send(response_buffer, &client_fd, &response);
 
 	close(client_fd);
