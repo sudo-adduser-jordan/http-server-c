@@ -22,7 +22,7 @@
 #define FLAG_DIRECTORY "--directory"
 
 #define REQEUST_BUFFER_SIZE 4096
-#define RESPONSE_BUFFER_SIZE 4096
+#define RESPONSE_BUFFER_SIZE 1024
 #define FILE_BUFFER_SIZE 4096
 
 #define STATUS_OK "HTTP/1.1 200 OK\r\n"
@@ -44,6 +44,7 @@ struct Request
 	char *accept_encoding;
 	char *host;
 	char *user_agent;
+	// char content_length[100];
 	char *content_length;
 	char *body;
 } Request;
@@ -62,11 +63,8 @@ int server_listen();
 void server_process_client(void *arg);
 
 void request_print(const struct Request *request);
-void request_scan(char *buffer, struct Request *request);
-
+void request_parse(char *buffer, struct Request *request);
 void response_print(const struct Response *response);
-void response_scan(struct Response *response, struct Request *request);
-void response_send(char *buffer, int *client_fd, struct Response *response);
 
 void request_print(const struct Request *request)
 {
@@ -76,7 +74,8 @@ void request_print(const struct Request *request)
 	printf("%s\n", request->accept_encoding ? request->accept_encoding : "(not specified)");
 	printf("%s\n", request->host ? request->host : "(not specified)");
 	printf("%s\n", request->user_agent ? request->user_agent : "(not specified)");
-	printf("%s\n", request->content_length ? request->content_length : "(not specified)");
+	// printf("%s\n", request->content_length ? request->content_length : "(not specified)");
+	printf("%s\n", request->content_length);
 	printf("%s\n", request->body ? request->body : "(not specified)");
 
 	printf(YELLOW "\nMethod\n" RESET);
@@ -85,7 +84,7 @@ void request_print(const struct Request *request)
 	printf("%s\n", request->version ? request->version : "(not specified)");
 }
 
-void request_scan(char *buffer, struct Request *request)
+void request_parse(char *buffer, struct Request *request)
 { // TODO: optimized
 
 	char *token = strtok(buffer, "\r\n");
@@ -125,7 +124,8 @@ void request_scan(char *buffer, struct Request *request)
 		}
 		else if (strstr(token, "content-length:") != NULL)
 		{
-			request->content_length = token;
+			// request->content_length = token;
+			strcpy(request->content_length, token);
 		}
 
 		token = strtok(NULL, "\r\n");
@@ -145,74 +145,62 @@ void response_print(const struct Response *response)
 
 	printf("Status: %s", response->status ? response->status : "(not specified)\n");
 	printf("Content-Type:  %s", response->content_type ? response->content_type : "(not specified)\n");
-	printf("Conetent-Length: %s", response->content_length ? response->content_length : "(not specified)\n");
+	// printf("Content-Length: %s", response->content_length ? response->content_length : "(not specified)\n");
+	printf("Content-Length: %s", response->content_length);
 	printf("Body:  %s", response->body ? response->body : "(not specified)\n");
 }
 
-void response_scan(struct Response *response, struct Request *request)
+void response_build(char *buffer, struct Request *request)
 {
-
-	if (strstr(request->path, "/files") != NULL)
+	if (strstr(request->path, "/files/") != NULL)
 	{
+		// strremove();
+		// strtok(); <-- probably faster
+
+		strremove(request->path, "/files/");
+
+		request->body = "file content";
+		snprintf(buffer, RESPONSE_BUFFER_SIZE,
+				 "%s%s%s%zd\r\n\r\n%s\r\n",
+				 STATUS_OK,
+				 CONTENT_TYPE_TEXT,
+				 CONTENT_LENGTH,
+				 strlen(request->body),
+				 request->body);
 	}
 	else if (strstr(request->path, "/user-agent") != NULL)
 	{
-		response->status = STATUS_OK;
-		response->content_type = CONTENT_TYPE_TEXT;
-
-		// char *token = strtok(request->user_agent, ":");
-		// response->body = strtok(NULL, " ");
-
-		// char content_length[100];
-		// sprintf(content_length,
-		// 		CONTENT_LENGTH "%zd" CLRF CLRF,
-		// 		strlen(response->body));
-
-		// response->content_length = content_length;
+		snprintf(buffer, RESPONSE_BUFFER_SIZE,
+				 "%s%s%s%zd\r\n\r\n%s\r\n",
+				 STATUS_OK,
+				 CONTENT_TYPE_TEXT,
+				 CONTENT_LENGTH,
+				 strlen(request->user_agent),
+				 request->user_agent);
 	}
 	else if (strstr(request->path, "/echo/") != NULL)
 	{
-		response->status = STATUS_OK;
-		response->content_type = CONTENT_TYPE_TEXT;
-
 		strremove(request->path, "/echo/");
-		response->body = request->path;
-
-		// char content_length[100];
-		// sprintf(content_length,
-		// 		CONTENT_LENGTH "%zd" CLRF CLRF,
-		// 		strlen(response->body));
-
-		// response->content_length = content_length;
+		snprintf(buffer, RESPONSE_BUFFER_SIZE,
+				 "%s%s%s%zd\r\n\r\n%s\r\n",
+				 STATUS_OK,
+				 CONTENT_TYPE_TEXT,
+				 CONTENT_LENGTH,
+				 strlen(request->path),
+				 request->path);
 	}
 	else if (strcmp(request->path, "/") == 0)
 	{
-		response->status = STATUS_OK CLRF;
-		response->content_type = NULL;
-		response->content_length = NULL;
-		response->body = NULL;
+		snprintf(buffer, RESPONSE_BUFFER_SIZE,
+				 "%s%s",
+				 STATUS_OK,
+				 CLRF);
 	}
 	else
 	{
-		response->status = STATUS_NOT_FOUND;
-		response->content_type = NULL;
-		response->content_length = NULL;
-		response->body = NULL;
-	}
-}
-
-void response_send(char *buffer, int *client_fd, struct Response *response)
-{
-	sprintf(buffer, "%s%s%s%s",
-			response->status,
-			response->content_type,
-			response->content_length,
-			response->body);
-
-	ssize_t error = send((int)*client_fd, buffer, strlen(buffer), 0);
-	if (error == -1)
-	{
-		printf(RED "Send failed: %s...\n" RESET, strerror(errno));
+		snprintf(buffer, RESPONSE_BUFFER_SIZE,
+				 "%s",
+				 STATUS_NOT_FOUND);
 	}
 }
 
@@ -262,16 +250,19 @@ void server_process_client(void *arg)
 	{
 		printf(GREEN "Message received.\n" RESET);
 	}
-	// printf(YELLOW "Raw Request: " RESET "\n%s\n", print_raw_string(request_buffer)); // can throw mem error
+	printf(YELLOW "Response:\n%s\n" RESET, request_buffer);
 
 	struct Request request;
-	request_scan(request_buffer, &request);
-	request_print(&request); // performance hit
+	request_parse(request_buffer, &request);
+	response_build(response_buffer, &request);
 
-	struct Response response;
-	response_scan(&response, &request);
-	response_print(&response); // performance hit
-	response_send(response_buffer, &client_fd, &response);
+	printf(YELLOW "Response:\n%s\n" RESET, response_buffer);
+	ssize_t error = send(client_fd, response_buffer, strlen(response_buffer), 0); // removing the send function off the stack increased the amount of successful requests
+	if (error == -1)
+	{
+		printf(RED "Send failed: %s...\n" RESET, strerror(errno));
+	}
+	printf(GREEN "Message sent.\n" RESET);
 
 	close(client_fd);
 }
@@ -291,7 +282,7 @@ int main(int argc, char *argv[])
 	int server_fd = server_listen();
 	printf(CYAN "Server listening...\n" RESET);
 
-	for (;;)
+	for (;;) // todo print ip and port
 	{
 		socklen_t client_addr_len;
 		struct sockaddr_in client_addr;
