@@ -62,28 +62,11 @@ int server_listen();
 void server_process_client(void *arg);
 
 void request_print(const struct Request *request);
-void request_free(struct Request *request);
 void request_scan(char *buffer, struct Request *request);
 
 void response_print(const struct Response *response);
 void response_scan(struct Response *response, struct Request *request);
 void response_send(char *buffer, int *client_fd, struct Response *response);
-
-void request_free(struct Request *request)
-{
-	free(request->url);
-	free(request->method);
-	free(request->path);
-	free(request->version);
-	free(request->accept);
-	free(request->accept_encoding);
-	free(request->host);
-	free(request->user_agent);
-	free(request->content_length);
-	free(request->body);
-
-	free(request);
-}
 
 void request_print(const struct Request *request)
 {
@@ -103,7 +86,7 @@ void request_print(const struct Request *request)
 }
 
 void request_scan(char *buffer, struct Request *request)
-{
+{ // TODO: optimized
 
 	char *token = strtok(buffer, "\r\n");
 	request->url = token;
@@ -283,11 +266,11 @@ void server_process_client(void *arg)
 
 	struct Request request;
 	request_scan(request_buffer, &request);
-	// request_print(&request); // performance hit
+	request_print(&request); // performance hit
 
 	struct Response response;
 	response_scan(&response, &request);
-	// response_print(&response); // performance hit
+	response_print(&response); // performance hit
 	response_send(response_buffer, &client_fd, &response);
 
 	close(client_fd);
