@@ -15,16 +15,17 @@
 #include "tpool.h"
 #include "colors.h"
 
-#define MAX_THREADS 4
+#define MAX_THREADS 1
+// #define MAX_THREADS 4 // one thread misses parse value, add graceful exit for canceled requests
 
 #define PORT 4221
 #define C_OK 0
 #define C_ERR 1
 #define FLAG_DIRECTORY "--directory"
 
-#define REQEUST_BUFFER_SIZE 4096
-#define RESPONSE_BUFFER_SIZE 1024
-#define FILE_BUFFER_SIZE 4096
+#define REQEUST_BUFFER_SIZE 1024
+#define RESPONSE_BUFFER_SIZE 4096
+#define FILE_BUFFER_SIZE 1024
 
 #define STATUS_OK "HTTP/1.1 200 OK\r\n"
 #define STATUS_NOT_FOUND "HTTP/1.1 404 NOT FOUND\r\n"
@@ -60,15 +61,20 @@ char *option_directory = NULL;
 
 int server_listen();
 void server_process_client(void *arg);
-
-void request_print(const struct Request *request);
 void request_parse(char *buffer, struct Request *request);
+void response_build(char *buffer, struct Request *request);
 
 void request_parse(char *buffer, struct Request *request)
 { // TODO: optimized
 
-	char *token = strtok(buffer, "\r\n");
-	request->url = token;
+	// printf(CYAN "Request Buffer:\n " YELLOW "%s\n" RESET, buffer);
+
+	char *token = strtok(buffer, " ");
+	request->method = token;
+	token = strtok(NULL, " ");
+	request->path = token;
+	token = strtok(NULL, " ");
+	request->version = token;
 
 	token = strtok(NULL, "\r\n");
 	while (token != NULL)
@@ -104,23 +110,19 @@ void request_parse(char *buffer, struct Request *request)
 		}
 		else if (strstr(token, "content-length:") != NULL)
 		{
-			// request->content_length = token;
-			strcpy(request->content_length, token);
+			request->content_length = token;
+			// strcpy(request->content_length, token);
 		}
 
 		token = strtok(NULL, "\r\n");
 	}
-
-	token = strtok(request->url, " ");
-	request->method = token;
-	token = strtok(NULL, " ");
-	request->path = token;
-	token = strtok(NULL, " ");
-	request->version = token;
 }
 
 void response_build(char *buffer, struct Request *request)
 {
+
+	// printf(RED "path: %s\n" RESET, request->path);
+
 	if (strstr(request->path, "/files/") != NULL)
 	{
 		// strremove();
@@ -216,38 +218,50 @@ void server_process_client(void *arg)
 	char response_buffer[RESPONSE_BUFFER_SIZE];
 	char request_buffer[REQEUST_BUFFER_SIZE];
 
-	if (recv(client_fd, request_buffer, sizeof(request_buffer), 0) != -1)
+	size_t error = recv(client_fd, request_buffer, sizeof(request_buffer), 0);
+	if (error == -1 || error == 0)
 	{
-		printf(GREEN "Message received.\n" RESET);
+		printf(RED "Recieved failed: %s...\n" RESET, strerror(errno));
 	}
-	// printf(YELLOW "%s\n" RESET, request_buffer); // printing creates more successful requests? slower respones
 
-	struct Request request;
-	request_parse(request_buffer, &request);
-	response_build(response_buffer, &request);
-	// printf(YELLOW "%s\n" RESET, response_buffer); // printing creates more successful requests? slower responses
-
-	ssize_t error = send(client_fd, response_buffer, strlen(response_buffer), 0); // removing the send function off the stack increased the amount of successful requests
-	if (error == -1)
+	if (strlen(request_buffer) < 1) // handle empty buffer
 	{
-		printf(RED "Send failed: %s...\n" RESET, strerror(errno));
+		printf(RED "buffer empty: %s...\n" RESET, strerror(errno));
 	}
-	printf(GREEN "Message sent.\n" RESET);
+	else
+	{
+
+		// printf(GREEN "Message received.\n" RESET);
+		// printf(YELLOW "%s\n" RESET, request_buffer);
+
+		struct Request request;
+		request_parse(request_buffer, &request); // <------------------ goes in not empty, passed empty
+		response_build(response_buffer, &request);
+		// printf(YELLOW "%s\n" RESET, response_buffer);
+		printf(CYAN "Response Buffer:\n " YELLOW "%s\n" RESET, response_buffer);
+
+		error = send(client_fd, response_buffer, strlen(response_buffer), 0);
+		if (error == -1)
+		{
+			printf(RED "Send failed: %s...\n" RESET, strerror(errno));
+		}
+		// printf(GREEN "Message sent.\n" RESET);
+	}
 
 	close(client_fd);
 }
 
-int main(int argc, char *argv[]) // verify the stack is overflowing because the job queue overflows the stack // set up debugger
+int main(int argc, char *argv[])
 {
-	if (strcmp(argv[1], FLAG_DIRECTORY) == 0)
-	{
-		option_directory = argv[2];
-	}
+	// if (strcmp(argv[1], FLAG_DIRECTORY) == 0)
+	// {
+	// 	option_directory = argv[2];
+	// }
 
 	setbuf(stdout, NULL);
 
 	threadpool thread_pool = thread_pool_init(MAX_THREADS);
-	printf(GREEN "Thread pool created: 4 threads\n" RESET);
+	printf(GREEN "Thread pool created: %d threads\n" RESET, MAX_THREADS);
 
 	int server_fd = server_listen();
 
@@ -264,12 +278,13 @@ int main(int argc, char *argv[]) // verify the stack is overflowing because the 
 		}
 		// printf(CYAN "Client connected: %s:%d <----------\n" RESET, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
-		int error = thread_pool_add_work(thread_pool, server_process_client, (void *)(uintptr_t)client_fd);
-		if (error == -1)
-		{
-			printf(RED "Failed to create pthread: %s\n" RESET, strerror(errno));
-			close(client_fd);
-		}
+		thread_pool_add_work(thread_pool, server_process_client, (void *)(uintptr_t)client_fd);
+		// int error = thread_pool_add_work(thread_pool, server_process_client, (void *)(uintptr_t)client_fd);
+		// if (error == -1)
+		// {
+		// 	printf(RED "Failed to create pthread: %s\n" RESET, strerror(errno));
+		// 	close(client_fd);
+		// }
 	}
 
 	printf(YELLOW "Waiting for thread pool work to complete..." RESET);
