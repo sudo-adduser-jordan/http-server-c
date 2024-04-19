@@ -9,6 +9,7 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <ctype.h>
+#include <arpa/inet.h>
 
 #include "utils.h"
 #include "tpool.h"
@@ -34,6 +35,12 @@
 
 #define CLRF "\r\n"
 
+struct ThreadArgs
+{
+	struct sockaddr_in client_addr;
+	int client_fd;
+} ThreadArgs;
+
 struct Request
 {
 	char *url;
@@ -49,14 +56,6 @@ struct Request
 	char *body;
 } Request;
 
-typedef struct Response
-{
-	char *status;
-	char *content_type;
-	char *content_length;
-	char *body;
-} Response;
-
 char *option_directory = NULL;
 
 int server_listen();
@@ -64,25 +63,6 @@ void server_process_client(void *arg);
 
 void request_print(const struct Request *request);
 void request_parse(char *buffer, struct Request *request);
-void response_print(const struct Response *response);
-
-void request_print(const struct Request *request)
-{
-	printf(YELLOW "\nRequest\n" RESET);
-	printf("%s\n", request->url ? request->url : "(not specified)");
-	printf("%s\n", request->accept ? request->accept : "(not specified)");
-	printf("%s\n", request->accept_encoding ? request->accept_encoding : "(not specified)");
-	printf("%s\n", request->host ? request->host : "(not specified)");
-	printf("%s\n", request->user_agent ? request->user_agent : "(not specified)");
-	// printf("%s\n", request->content_length ? request->content_length : "(not specified)");
-	printf("%s\n", request->content_length);
-	printf("%s\n", request->body ? request->body : "(not specified)");
-
-	printf(YELLOW "\nMethod\n" RESET);
-	printf("%s\n", request->method ? request->method : "(not specified)");
-	printf("%s\n", request->path ? request->path : "(not specified)");
-	printf("%s\n", request->version ? request->version : "(not specified)");
-}
 
 void request_parse(char *buffer, struct Request *request)
 { // TODO: optimized
@@ -137,17 +117,6 @@ void request_parse(char *buffer, struct Request *request)
 	request->path = token;
 	token = strtok(NULL, " ");
 	request->version = token;
-}
-
-void response_print(const struct Response *response)
-{
-	printf(GREEN "\nResponse\n" RESET);
-
-	printf("Status: %s", response->status ? response->status : "(not specified)\n");
-	printf("Content-Type:  %s", response->content_type ? response->content_type : "(not specified)\n");
-	// printf("Content-Length: %s", response->content_length ? response->content_length : "(not specified)\n");
-	printf("Content-Length: %s", response->content_length);
-	printf("Body:  %s", response->body ? response->body : "(not specified)\n");
 }
 
 void response_build(char *buffer, struct Request *request)
@@ -236,6 +205,7 @@ int server_listen()
 		printf(RED "Listen failed: %s \n" RESET, strerror(errno));
 		return C_ERR;
 	}
+	printf(CYAN "Server listening: %s:%d <----------\n" RESET, inet_ntoa(serv_addr.sin_addr), ntohs(serv_addr.sin_port));
 
 	return server_fd;
 }
@@ -250,13 +220,13 @@ void server_process_client(void *arg)
 	{
 		printf(GREEN "Message received.\n" RESET);
 	}
-	printf(YELLOW "Response:\n%s\n" RESET, request_buffer);
+	// printf(YELLOW "%s\n" RESET, request_buffer); // printing creates more successful requests? slower respones
 
 	struct Request request;
 	request_parse(request_buffer, &request);
 	response_build(response_buffer, &request);
+	// printf(YELLOW "%s\n" RESET, response_buffer); // printing creates more successful requests? slower responses
 
-	printf(YELLOW "Response:\n%s\n" RESET, response_buffer);
 	ssize_t error = send(client_fd, response_buffer, strlen(response_buffer), 0); // removing the send function off the stack increased the amount of successful requests
 	if (error == -1)
 	{
@@ -267,7 +237,7 @@ void server_process_client(void *arg)
 	close(client_fd);
 }
 
-int main(int argc, char *argv[]) // verify the stack is overflowing because the job queue overflows the stack
+int main(int argc, char *argv[]) // verify the stack is overflowing because the job queue overflows the stack // set up debugger
 {
 	if (strcmp(argv[1], FLAG_DIRECTORY) == 0)
 	{
@@ -280,7 +250,6 @@ int main(int argc, char *argv[]) // verify the stack is overflowing because the 
 	printf(GREEN "Thread pool created: 4 threads\n" RESET);
 
 	int server_fd = server_listen();
-	printf(CYAN "Server listening...\n" RESET);
 
 	for (;;) // todo print ip and port
 	{
@@ -289,12 +258,18 @@ int main(int argc, char *argv[]) // verify the stack is overflowing because the 
 
 		client_addr_len = sizeof(client_addr);
 		int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
-		if (client_fd != -1)
+		if (client_fd == -1)
 		{
-			printf(GREEN "Connection Accepted.\n" RESET);
+			printf(RED "Client connection failed: %s \n" RESET, strerror(errno));
 		}
+		// printf(CYAN "Client connected: %s:%d <----------\n" RESET, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
-		thread_pool_add_work(thread_pool, server_process_client, (void *)(uintptr_t)client_fd);
+		int error = thread_pool_add_work(thread_pool, server_process_client, (void *)(uintptr_t)client_fd);
+		if (error == -1)
+		{
+			printf(RED "Failed to create pthread: %s\n" RESET, strerror(errno));
+			close(client_fd);
+		}
 	}
 
 	printf(YELLOW "Waiting for thread pool work to complete..." RESET);
