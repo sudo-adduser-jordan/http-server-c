@@ -3,6 +3,9 @@ curl -v -X GET http://localhost:4221/
 curl -i -X GET http://localhost:4221/echo/abc
 curl -v -X GET http://localhost:4221/echo/scooby/donkey-dooby
 curl -i -X GET http://localhost:4221/user-agent
+curl -i -X GET http://localhost:4221/files/test.txt
+curl -i -X GET http://localhost:4221/files/tFst.txt
+curl -i -X GET http://localhost:4221/fiFles/test.txt
 
 curl -v -X GET http://localhost:4221/vanilla/Coo-237
 curl -v -X GET http://localhost:4221/donkey/vanilla

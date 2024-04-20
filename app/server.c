@@ -1,22 +1,24 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/ip.h>
-#include <string.h>
-#include <errno.h>
-#include <unistd.h>
-#include <pthread.h>
-#include <stdint.h>
-#include <ctype.h>
-#include <arpa/inet.h>
+#include <stdio.h>		// i/o
+#include <stdlib.h>		// standard library
+#include <sys/socket.h> // system sockets
+#include <netinet/in.h> //
+#include <netinet/ip.h> //
+#include <string.h>		// string
+#include <errno.h>		// errors
+#include <unistd.h>		//
+#include <pthread.h>	// threading
+#include <stdint.h>		// integars
+#include <ctype.h>		//
+#include <arpa/inet.h>	//
+#include <dirent.h>		//
 
 #include "utils.h"
 #include "tpool.h"
 #include "colors.h"
 
+// #define MAX_THREADS 4 // one thread misses parse value, add graceful exit for canceled requests, only happens on large amounts of requests
 #define MAX_THREADS 1
-// #define MAX_THREADS 4 // one thread misses parse value, add graceful exit for canceled requests
+#define MAX_FILE_BUFFER_SIZE 1024
 
 #define PORT 4221
 #define C_OK 0
@@ -36,7 +38,7 @@
 
 #define CLRF "\r\n"
 
-struct ThreadArgs
+struct ThreadArgs // add for print statement
 {
 	struct sockaddr_in client_addr;
 	int client_fd;
@@ -52,7 +54,6 @@ struct Request
 	char *accept_encoding;
 	char *host;
 	char *user_agent;
-	// char content_length[100];
 	char *content_length;
 	char *body;
 } Request;
@@ -63,6 +64,36 @@ int server_listen();
 void server_process_client(void *arg);
 void request_parse(char *buffer, struct Request *request);
 void response_build(char *buffer, struct Request *request);
+
+/* Read file return string buffer */
+char *file_return_buffer(char *path, int file_buffer_size)
+{
+	char *buffer = malloc(file_buffer_size);
+	FILE *file = fopen(path, "r");
+
+	if (file == NULL)
+	{
+		perror("Error opening file\n");
+	}
+	else
+	{
+		size_t newLen = fread(buffer, sizeof(char), file_buffer_size, file);
+
+		if (ferror(file) != 0)
+		{
+			perror("Error reading file\n");
+		}
+		else
+		{
+			buffer[newLen++] = '\0'; /* Just to be safe. */
+		}
+
+		fclose(file);
+	}
+
+	printf("File content: \n%s\n", buffer);
+	return buffer;
+}
 
 void request_parse(char *buffer, struct Request *request)
 { // TODO: optimized
@@ -120,17 +151,18 @@ void request_parse(char *buffer, struct Request *request)
 
 void response_build(char *buffer, struct Request *request)
 {
-
 	// printf(RED "path: %s\n" RESET, request->path);
 
-	if (strstr(request->path, "/files/") != NULL)
+	char path[1024];
+	if (getcwd(path, sizeof(path)) == NULL)
 	{
-		// strremove();
-		// strtok(); <-- probably faster
+		perror("getcwd() error");
+	}
+	strcat(path, request->path);
 
-		strremove(request->path, "/files/");
-
-		request->body = "file content";
+	if (access(path, F_OK) == 0) // linux specific
+	{
+		request->body = file_return_buffer(path, MAX_FILE_BUFFER_SIZE);
 		snprintf(buffer, RESPONSE_BUFFER_SIZE,
 				 "%s%s%s%zd\r\n\r\n%s\r\n",
 				 STATUS_OK,
@@ -230,22 +262,18 @@ void server_process_client(void *arg)
 	}
 	else
 	{
-
-		// printf(GREEN "Message received.\n" RESET);
 		// printf(YELLOW "%s\n" RESET, request_buffer);
 
 		struct Request request;
 		request_parse(request_buffer, &request); // <------------------ goes in not empty, passed empty
 		response_build(response_buffer, &request);
-		// printf(YELLOW "%s\n" RESET, response_buffer);
-		printf(CYAN "Response Buffer:\n " YELLOW "%s\n" RESET, response_buffer);
+		// printf(CYAN "Response Buffer:\n " YELLOW "%s\n" RESET, response_buffer);
 
 		error = send(client_fd, response_buffer, strlen(response_buffer), 0);
 		if (error == -1)
 		{
 			printf(RED "Send failed: %s...\n" RESET, strerror(errno));
 		}
-		// printf(GREEN "Message sent.\n" RESET);
 	}
 
 	close(client_fd);
@@ -264,7 +292,6 @@ int main(int argc, char *argv[])
 	printf(GREEN "Thread pool created: %d threads\n" RESET, MAX_THREADS);
 
 	int server_fd = server_listen();
-
 	for (;;) // todo print ip and port
 	{
 		socklen_t client_addr_len;
@@ -276,15 +303,14 @@ int main(int argc, char *argv[])
 		{
 			printf(RED "Client connection failed: %s \n" RESET, strerror(errno));
 		}
-		// printf(CYAN "Client connected: %s:%d <----------\n" RESET, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+		printf(CYAN "Client connected: %s:%d <----------\n" RESET, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
-		thread_pool_add_work(thread_pool, server_process_client, (void *)(uintptr_t)client_fd);
-		// int error = thread_pool_add_work(thread_pool, server_process_client, (void *)(uintptr_t)client_fd);
-		// if (error == -1)
-		// {
-		// 	printf(RED "Failed to create pthread: %s\n" RESET, strerror(errno));
-		// 	close(client_fd);
-		// }
+		int error = thread_pool_add_work(thread_pool, server_process_client, (void *)(uintptr_t)client_fd);
+		if (error == -1)
+		{
+			printf(RED "Failed to create pthread: %s\n" RESET, strerror(errno));
+			close(client_fd);
+		}
 	}
 
 	printf(YELLOW "Waiting for thread pool work to complete..." RESET);
