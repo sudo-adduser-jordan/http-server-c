@@ -10,7 +10,7 @@
                 "-Wall",
                 "app/*.c",
                 "-o",
-                "${workspaceFolder}bin/http-server.exe"
+                "${workspaceFolder}bin/http-server.exe",
             ],
             "options": {
                 "cwd": "${workspaceFolder}"

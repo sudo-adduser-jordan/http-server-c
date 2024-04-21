@@ -1,36 +1,37 @@
-#include <stdio.h>		// i/o
-#include <stdlib.h>		// standard library
-#include <sys/socket.h> // system sockets
-#include <netinet/in.h> //
-#include <netinet/ip.h> //
-#include <string.h>		// string
-#include <errno.h>		// errors
-#include <unistd.h>		//
-#include <pthread.h>	// threading
-#include <stdint.h>		// integars
-#include <ctype.h>		//
-#include <arpa/inet.h>	//
-#include <dirent.h>		//
+#include <stdio.h>		// standard buffered input/output
+#include <stdlib.h>		// standard library definitions
+#include <sys/socket.h> // internet protocol family
+#include <netinet/in.h> // internet address family
+#include <netinet/ip.h> // internet protocol family
+#include <arpa/inet.h>	// definitions for internet operations
+#include <string.h>		// string operations
+#include <errno.h>		// error return value
+#include <unistd.h>		// standard symbolic constants and types
+#include <pthread.h>	// threads
+#include <stdint.h>		// integer types
+#include <ctype.h>		// character types
+#include <dirent.h>		// format of directory entries
 
 #include "utils.h"
 #include "tpool.h"
 #include "colors.h"
 
-// #define MAX_THREADS 4 // one thread misses parse value, add graceful exit for canceled requests, only happens on large amounts of requests
-#define MAX_THREADS 1
-#define MAX_FILE_BUFFER_SIZE 1024
+#define MAX_THREADS 4
 
-#define PORT 4221
 #define C_OK 0
 #define C_ERR 1
+#define PORT 4221
 #define FLAG_DIRECTORY "--directory"
 
+#define FILE_BUFFER_SIZE 1024
 #define REQEUST_BUFFER_SIZE 1024
 #define RESPONSE_BUFFER_SIZE 4096
-#define FILE_BUFFER_SIZE 1024
 
 #define STATUS_OK "HTTP/1.1 200 OK\r\n"
-#define STATUS_NOT_FOUND "HTTP/1.1 404 NOT FOUND\r\n"
+#define STATUS_CREATED "HTTP/1.1 201 CREATED\r\n\r\n"
+#define STATUS_NOT_FOUND "HTTP/1.1 404 NOT FOUND\r\n\r\n"
+#define STATUS_INTERNAL_SERVER_ERROR "HTTP/1.1 500 INTERNAL SERVER ERROR\r\n\r\n"
+#define STATUS_METHOD_NOT_ALLOWED "HTTP/1.1 405 METHOD NOT ALLOWED\r\n\r\n"
 
 #define CONTENT_LENGTH "Content-Length: "
 #define CONTENT_TYPE_TEXT "Content-Type: text/plain\r\n"
@@ -38,7 +39,7 @@
 
 #define CLRF "\r\n"
 
-struct ThreadArgs // add for print statement
+struct ThreadArgs
 {
 	struct sockaddr_in client_addr;
 	int client_fd;
@@ -46,7 +47,6 @@ struct ThreadArgs // add for print statement
 
 struct Request
 {
-	char *url;
 	char *method;
 	char *path;
 	char *version;
@@ -63,42 +63,24 @@ char *option_directory = NULL;
 int server_listen();
 void server_process_client(void *arg);
 void request_parse(char *buffer, struct Request *request);
+void request_print(const struct Request *request);
 void response_build(char *buffer, struct Request *request);
 
-/* Read file return string buffer */
-char *file_return_buffer(char *path, int file_buffer_size)
+void request_print(const struct Request *request)
 {
-	char *buffer = malloc(file_buffer_size);
-	FILE *file = fopen(path, "r");
-
-	if (file == NULL)
-	{
-		perror("Error opening file\n");
-	}
-	else
-	{
-		size_t newLen = fread(buffer, sizeof(char), file_buffer_size, file);
-
-		if (ferror(file) != 0)
-		{
-			perror("Error reading file\n");
-		}
-		else
-		{
-			buffer[newLen++] = '\0'; /* Just to be safe. */
-		}
-
-		fclose(file);
-	}
-
-	printf("File content: \n%s\n", buffer);
-	return buffer;
+	printf(YELLOW "%s\n" RESET, request->method);
+	printf(YELLOW "%s\n" RESET, request->path);
+	printf(YELLOW "%s\n" RESET, request->version);
+	printf(YELLOW "%s\n" RESET, request->accept);
+	printf(YELLOW "%s\n" RESET, request->accept_encoding);
+	printf(YELLOW "%s\n" RESET, request->host);
+	printf(YELLOW "%s\n" RESET, request->user_agent);
+	printf(YELLOW "%s\n" RESET, request->content_length);
+	printf(YELLOW "%s\n" RESET, request->body);
 }
 
 void request_parse(char *buffer, struct Request *request)
-{ // TODO: optimized
-
-	// printf(CYAN "Request Buffer:\n " YELLOW "%s\n" RESET, buffer);
+{ // TODO: optimize
 
 	char *token = strtok(buffer, " ");
 	request->method = token;
@@ -111,38 +93,46 @@ void request_parse(char *buffer, struct Request *request)
 	while (token != NULL)
 	{
 
-		if (strstr(token, ":") == NULL)
+		if (!request->accept)
 		{
-			request->body = token;
-		}
-		else
-		{
-			for (int i = 0; token[i]; i++) // flatten
+			if (strstr(token, "Accept:") != NULL || strstr(token, "accept:") != NULL)
 			{
-				token[i] = tolower(token[i]);
+				request->accept = token;
 			}
 		}
 
-		if (strstr(token, "accept:") != NULL)
+		if (!request->accept_encoding)
 		{
-			request->accept = token;
+			if (strstr(token, "Accept-encoding:") != NULL || strstr(token, "accept-encoding:") != NULL)
+			{
+				request->accept_encoding = token;
+			}
 		}
-		else if (strstr(token, "accept-encoding:") != NULL)
+
+		if (!request->user_agent)
 		{
-			request->accept_encoding = token;
+
+			if (strstr(token, "User-Agent:") != NULL || strstr(token, "user-agent:") != NULL)
+			{
+				request->user_agent = token;
+			}
 		}
-		else if (strstr(token, "user-agent:") != NULL)
+
+		if (!request->host)
 		{
-			request->user_agent = token;
+			if (strstr(token, "Host:") != NULL || strstr(token, "host:") != NULL)
+			{
+				request->host = token;
+			}
 		}
-		else if (strstr(token, "host:") != NULL)
-		{
-			request->host = token;
-		}
-		else if (strstr(token, "content-length:") != NULL)
+
+		if (strstr(token, "Content-Length:") != NULL || strstr(token, "content-length:") != NULL)
 		{
 			request->content_length = token;
-			// strcpy(request->content_length, token);
+		}
+		else
+		{
+			request->body = token;
 		}
 
 		token = strtok(NULL, "\r\n");
@@ -151,28 +141,26 @@ void request_parse(char *buffer, struct Request *request)
 
 void response_build(char *buffer, struct Request *request)
 {
-	// printf(RED "path: %s\n" RESET, request->path);
 
-	char path[1024];
-	if (getcwd(path, sizeof(path)) == NULL)
-	{
-		perror("getcwd() error");
-	}
-	strcat(path, request->path);
+	// printf(CYAN "Request Buffer:\n" YELLOW "%s\n" RESET, buffer); // debug null
 
-	if (access(path, F_OK) == 0) // linux specific
+	if (!request->path)
 	{
-		request->body = file_return_buffer(path, MAX_FILE_BUFFER_SIZE);
 		snprintf(buffer, RESPONSE_BUFFER_SIZE,
-				 "%s%s%s%zd\r\n\r\n%s\r\n",
+				 "%s",
+				 STATUS_INTERNAL_SERVER_ERROR);
+	}
+	else if (strcmp(request->path, "/") == 0)
+	{
+		snprintf(buffer, RESPONSE_BUFFER_SIZE,
+				 "%s%s",
 				 STATUS_OK,
-				 CONTENT_TYPE_TEXT,
-				 CONTENT_LENGTH,
-				 strlen(request->body),
-				 request->body);
+				 CLRF);
 	}
 	else if (strstr(request->path, "/user-agent") != NULL)
 	{
+		strremove(request->user_agent, "user-agent: ");
+		strremove(request->user_agent, "User-Agent: ");
 		snprintf(buffer, RESPONSE_BUFFER_SIZE,
 				 "%s%s%s%zd\r\n\r\n%s\r\n",
 				 STATUS_OK,
@@ -192,12 +180,65 @@ void response_build(char *buffer, struct Request *request)
 				 strlen(request->path),
 				 request->path);
 	}
-	else if (strcmp(request->path, "/") == 0)
+	else if (strstr(request->path, "/files/") != NULL)
 	{
-		snprintf(buffer, RESPONSE_BUFFER_SIZE,
-				 "%s%s",
-				 STATUS_OK,
-				 CLRF);
+
+		if (strstr(request->method, "GET") != NULL) // GET
+		{
+			char filepath[1024] = {0};
+			request->path++; // move pointer forward one
+			strcat(filepath, option_directory);
+			strcat(filepath, request->path);
+			strremove(filepath, "files/");
+
+			FILE *file_ptr = fopen(filepath, "r");
+			if (file_ptr != NULL)
+			{
+				fseek(file_ptr, 0, SEEK_END);
+				int size = ftell(file_ptr);
+				char data[1000] = {0};
+				fseek(file_ptr, 0, SEEK_SET);
+				fread(data, sizeof(char), size, file_ptr);
+				fclose(file_ptr);
+
+				snprintf(buffer, RESPONSE_BUFFER_SIZE,
+						 "%s%s%s%d\r\n\r\n%s\r\n",
+						 STATUS_OK,
+						 CONTENT_TYPE_FILE,
+						 CONTENT_LENGTH,
+						 size,
+						 data);
+			}
+			else
+			{
+				snprintf(buffer, RESPONSE_BUFFER_SIZE,
+						 "%s",
+						 STATUS_NOT_FOUND);
+			}
+		}
+		else if (strstr(request->method, "POST") != NULL) // POST
+		{
+			char filepath[1024] = {0};
+			request->path++; // move pointer forward one
+			strcat(filepath, option_directory);
+			strcat(filepath, request->path);
+			strremove(filepath, "files/");
+
+			FILE *file_prt;
+			file_prt = fopen(filepath, "w");
+			fprintf(file_prt, request->body);
+			fclose(file_prt);
+
+			snprintf(buffer, RESPONSE_BUFFER_SIZE,
+					 "%s",
+					 STATUS_CREATED);
+		}
+		else
+		{
+			snprintf(buffer, RESPONSE_BUFFER_SIZE,
+					 "%s",
+					 STATUS_METHOD_NOT_ALLOWED);
+		}
 	}
 	else
 	{
@@ -246,77 +287,75 @@ int server_listen()
 
 void server_process_client(void *arg)
 {
-	int client_fd = (uintptr_t)arg;
+	struct ThreadArgs *thread_args = (struct ThreadArgs *)(arg);
 	char response_buffer[RESPONSE_BUFFER_SIZE];
 	char request_buffer[REQEUST_BUFFER_SIZE];
 
-	size_t error = recv(client_fd, request_buffer, sizeof(request_buffer), 0);
-	if (error == -1 || error == 0)
+	if (recv(thread_args->client_fd, request_buffer, sizeof(request_buffer), 0) == -1)
 	{
 		printf(RED "Recieved failed: %s...\n" RESET, strerror(errno));
 	}
+	// printf(CYAN "Request Buffer:\n" YELLOW "%s\n" RESET, request_buffer);
 
-	if (strlen(request_buffer) < 1) // handle empty buffer
+	struct Request request;
+	request_parse(request_buffer, &request);
+	response_build(response_buffer, &request);
+
+	// request_print(&request);
+	// printf(CYAN "Response Buffer:\n" YELLOW "%s\n" RESET, response_buffer);
+	if (send(thread_args->client_fd, response_buffer, strlen(response_buffer), 0) == -1)
 	{
-		printf(RED "buffer empty: %s...\n" RESET, strerror(errno));
+		printf(RED "Send failed: %s...\n" RESET, strerror(errno));
 	}
-	else
-	{
-		// printf(YELLOW "%s\n" RESET, request_buffer);
+	printf(GREEN "Message sent: %s:%d <----------\n" RESET, inet_ntoa(thread_args->client_addr.sin_addr), ntohs(thread_args->client_addr.sin_port));
 
-		struct Request request;
-		request_parse(request_buffer, &request); // <------------------ goes in not empty, passed empty
-		response_build(response_buffer, &request);
-		// printf(CYAN "Response Buffer:\n " YELLOW "%s\n" RESET, response_buffer);
-
-		error = send(client_fd, response_buffer, strlen(response_buffer), 0);
-		if (error == -1)
-		{
-			printf(RED "Send failed: %s...\n" RESET, strerror(errno));
-		}
-	}
-
-	close(client_fd);
+	close(thread_args->client_fd);
+	free(thread_args);
 }
 
 int main(int argc, char *argv[])
 {
-	// if (strcmp(argv[1], FLAG_DIRECTORY) == 0)
-	// {
-	// 	option_directory = argv[2];
-	// }
+
+	if (argv[1] != NULL)
+	{
+		if (strcmp(argv[1], FLAG_DIRECTORY) == 0)
+		{
+			option_directory = argv[2];
+			printf(YELLOW "Directory path set: " RESET "%s\n", option_directory);
+		}
+	}
 
 	setbuf(stdout, NULL);
 
-	threadpool thread_pool = thread_pool_init(MAX_THREADS);
+	threadpool thread_pool = tpool_init(MAX_THREADS);
 	printf(GREEN "Thread pool created: %d threads\n" RESET, MAX_THREADS);
 
 	int server_fd = server_listen();
-	for (;;) // todo print ip and port
+	for (;;)
 	{
-		socklen_t client_addr_len;
-		struct sockaddr_in client_addr;
+		void *thread_args_ptr = malloc(sizeof(struct ThreadArgs));
+		struct ThreadArgs *thread_args = (struct ThreadArgs *)(thread_args_ptr);
 
-		client_addr_len = sizeof(client_addr);
-		int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
-		if (client_fd == -1)
+		socklen_t client_addr_len = sizeof(thread_args->client_addr);
+		thread_args->client_fd = accept(server_fd, (struct sockaddr *)&thread_args->client_addr, &client_addr_len);
+		if (thread_args->client_fd == -1)
 		{
 			printf(RED "Client connection failed: %s \n" RESET, strerror(errno));
 		}
-		printf(CYAN "Client connected: %s:%d <----------\n" RESET, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+		printf(CYAN "Client connected: %s:%d <----------\n" RESET, inet_ntoa(thread_args->client_addr.sin_addr), ntohs(thread_args->client_addr.sin_port));
 
-		int error = thread_pool_add_work(thread_pool, server_process_client, (void *)(uintptr_t)client_fd);
-		if (error == -1)
+		if (tpool_add_work(thread_pool, server_process_client, (void *)thread_args) == -1)
 		{
 			printf(RED "Failed to create pthread: %s\n" RESET, strerror(errno));
-			close(client_fd);
+			close(thread_args->client_fd);
+			free(thread_args_ptr);
 		}
 	}
 
 	printf(YELLOW "Waiting for thread pool work to complete..." RESET);
-	thread_pool_wait(thread_pool);
+	tpool_wait(thread_pool);
 	printf(RED "Killing threadpool..." RESET);
-	thread_pool_destroy(thread_pool);
+	tpool_destroy(thread_pool);
 	printf(RED "Closing server socket..." RESET);
 	close(server_fd);
 

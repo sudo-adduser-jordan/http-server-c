@@ -6,13 +6,11 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/bin/http-server.exe",
-            "args": [
- 
-            ],
+            "args": ["--directory", "/home/user1/Downloads/codecrafters-http-server-c/"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
-            "externalConsole": false,
+            "externalConsole": true,
             "MIMode": "gdb",
             "setupCommands": [
                 {
