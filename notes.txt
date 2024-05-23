@@ -24,3 +24,12 @@ oha  http://localhost:4221 -n 1000
 oha  http://localhost:4221/user-agent -n 1000
 oha  http://localhost:4221/echo/scooby/donkey-F -n 1000
 oha  http://localhost:4221/test.txt -n 1000
+
+
+
+ curl -v -X GET http://localhost:4221/echo/pineapple -H "Accept-Encoding: gzip"
+
+
+
+
+curl -v -X GET http://localhost:4221/echo/strawberry -H "Accept-Encoding: gzip"

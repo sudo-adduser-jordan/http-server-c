@@ -11,8 +11,8 @@
 #include <stdint.h>		// integer types
 #include <ctype.h>		// character types
 #include <dirent.h>		// format of directory entries
+#include <zlib.h>		// gzip compression
 
-#include "utils.h"
 #include "tpool.h"
 #include "colors.h"
 
@@ -23,19 +23,22 @@
 #define PORT 4221
 #define FLAG_DIRECTORY "--directory"
 
+#define BUFFER_SIZE 1024
 #define FILE_BUFFER_SIZE 1024
 #define REQEUST_BUFFER_SIZE 1024
 #define RESPONSE_BUFFER_SIZE 4096
 
 #define STATUS_OK "HTTP/1.1 200 OK\r\n"
-#define STATUS_CREATED "HTTP/1.1 201 CREATED\r\n\r\n"
-#define STATUS_NOT_FOUND "HTTP/1.1 404 NOT FOUND\r\n\r\n"
-#define STATUS_INTERNAL_SERVER_ERROR "HTTP/1.1 500 INTERNAL SERVER ERROR\r\n\r\n"
-#define STATUS_METHOD_NOT_ALLOWED "HTTP/1.1 405 METHOD NOT ALLOWED\r\n\r\n"
+#define STATUS_CREATED "HTTP/1.1 201 Created\r\n\r\n"
+#define STATUS_NOT_FOUND "HTTP/1.1 404 Not Found\r\n\r\n"
+#define STATUS_INTERNAL_SERVER_ERROR "HTTP/1.1 500 Internal Server Error\r\n\r\n"
+#define STATUS_METHOD_NOT_ALLOWED "HTTP/1.1 405 Method Not Allowed\r\n\r\n"
 
 #define CONTENT_LENGTH "Content-Length: "
 #define CONTENT_TYPE_TEXT "Content-Type: text/plain\r\n"
 #define CONTENT_TYPE_FILE "Content-Type: application/octet-stream\r\n"
+
+#define CONTENT_ENCODING_GZIP "Content-Encoding: gzip\r\n"
 
 #define CLRF "\r\n"
 
@@ -56,6 +59,7 @@ struct Request
 	char *user_agent;
 	char *content_length;
 	char *body;
+	size_t size;
 } Request;
 
 char *option_directory = NULL;
@@ -65,6 +69,31 @@ void server_process_client(void *arg);
 void request_parse(char *buffer, struct Request *request);
 void request_print(const struct Request *request);
 void response_build(char *buffer, struct Request *request);
+int compressToGzip(const char *input, int inputSize, char *output, int outputSize);
+void strremove(char *s, const char *toremove);
+
+void strremove(char *s, const char *toremove)
+{
+	while ((s = strstr(s, toremove)))
+		memmove(s, s + strlen(toremove), 1 + strlen(s + strlen(toremove)));
+}
+
+int compressToGzip(const char *input, int inputSize, char *output, int outputSize)
+{
+	z_stream zs = {0};
+	zs.zalloc = Z_NULL;
+	zs.zfree = Z_NULL;
+	zs.opaque = Z_NULL;
+	zs.avail_in = (uInt)inputSize;
+	zs.next_in = (Bytef *)input;
+	zs.avail_out = (uInt)outputSize;
+	zs.next_out = (Bytef *)output;
+
+	deflateInit2(&zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 | 16, 8, Z_DEFAULT_STRATEGY);
+	deflate(&zs, Z_FINISH);
+	deflateEnd(&zs);
+	return zs.total_out;
+}
 
 void request_print(const struct Request *request)
 {
@@ -103,7 +132,7 @@ void request_parse(char *buffer, struct Request *request)
 
 		if (!request->accept_encoding)
 		{
-			if (strstr(token, "Accept-encoding:") != NULL || strstr(token, "accept-encoding:") != NULL)
+			if (strstr(token, "Accept-Encoding:") != NULL || strstr(token, "accept-encoding:") != NULL)
 			{
 				request->accept_encoding = token;
 			}
@@ -140,45 +169,70 @@ void request_parse(char *buffer, struct Request *request)
 }
 
 void response_build(char *buffer, struct Request *request)
-{
+{ // TODO: optimize
 
 	// printf(CYAN "Request Buffer:\n" YELLOW "%s\n" RESET, buffer); // debug null
 
 	if (!request->path)
 	{
-		snprintf(buffer, RESPONSE_BUFFER_SIZE,
-				 "%s",
-				 STATUS_INTERNAL_SERVER_ERROR);
+		sprintf(buffer,
+				"%s",
+				STATUS_INTERNAL_SERVER_ERROR);
 	}
 	else if (strcmp(request->path, "/") == 0)
 	{
-		snprintf(buffer, RESPONSE_BUFFER_SIZE,
-				 "%s%s",
-				 STATUS_OK,
-				 CLRF);
+		sprintf(buffer,
+				"%s%s",
+				STATUS_OK,
+				CLRF);
 	}
 	else if (strstr(request->path, "/user-agent") != NULL)
 	{
 		strremove(request->user_agent, "user-agent: ");
 		strremove(request->user_agent, "User-Agent: ");
-		snprintf(buffer, RESPONSE_BUFFER_SIZE,
-				 "%s%s%s%zd\r\n\r\n%s\r\n",
-				 STATUS_OK,
-				 CONTENT_TYPE_TEXT,
-				 CONTENT_LENGTH,
-				 strlen(request->user_agent),
-				 request->user_agent);
+		sprintf(buffer,
+				"%s%s%s%zd\r\n\r\n%s\r\n",
+				STATUS_OK,
+				CONTENT_TYPE_TEXT,
+				CONTENT_LENGTH,
+				strlen(request->user_agent),
+				request->user_agent);
 	}
 	else if (strstr(request->path, "/echo/") != NULL)
 	{
-		strremove(request->path, "/echo/");
-		snprintf(buffer, RESPONSE_BUFFER_SIZE,
-				 "%s%s%s%zd\r\n\r\n%s\r\n",
-				 STATUS_OK,
-				 CONTENT_TYPE_TEXT,
-				 CONTENT_LENGTH,
-				 strlen(request->path),
-				 request->path);
+		if (request->accept_encoding && strstr(request->accept_encoding, "gzip") != NULL)
+		{
+			strremove(request->path, "/echo/");
+
+			char body[BUFFER_SIZE];
+			int len = compressToGzip(request->path, strlen(request->path), body, 1024);
+			if (len < 0)
+			{
+				printf(RED "Compression failed: %s...\n" RESET, strerror(errno));
+			}
+
+			sprintf(buffer,
+					"%s%s%s%s%d\r\n\r\n",
+					STATUS_OK,
+					CONTENT_TYPE_TEXT,
+					CONTENT_ENCODING_GZIP,
+					CONTENT_LENGTH,
+					len);
+
+			memcpy(buffer + strlen(buffer), body, len);
+			request->size = len;
+		}
+		else
+		{
+			strremove(request->path, "/echo/");
+			sprintf(buffer,
+					"%s%s%s%zd\r\n\r\n%s\r\n",
+					STATUS_OK,
+					CONTENT_TYPE_TEXT,
+					CONTENT_LENGTH,
+					strlen(request->path),
+					request->path);
+		}
 	}
 	else if (strstr(request->path, "/files/") != NULL)
 	{
@@ -201,19 +255,19 @@ void response_build(char *buffer, struct Request *request)
 				fread(data, sizeof(char), size, file_ptr);
 				fclose(file_ptr);
 
-				snprintf(buffer, RESPONSE_BUFFER_SIZE,
-						 "%s%s%s%d\r\n\r\n%s\r\n",
-						 STATUS_OK,
-						 CONTENT_TYPE_FILE,
-						 CONTENT_LENGTH,
-						 size,
-						 data);
+				sprintf(buffer,
+						"%s%s%s%d\r\n\r\n%s\r\n",
+						STATUS_OK,
+						CONTENT_TYPE_FILE,
+						CONTENT_LENGTH,
+						size,
+						data);
 			}
 			else
 			{
-				snprintf(buffer, RESPONSE_BUFFER_SIZE,
-						 "%s",
-						 STATUS_NOT_FOUND);
+				sprintf(buffer,
+						"%s",
+						STATUS_NOT_FOUND);
 			}
 		}
 		else if (strstr(request->method, "POST") != NULL) // POST
@@ -229,22 +283,22 @@ void response_build(char *buffer, struct Request *request)
 			fprintf(file_prt, request->body);
 			fclose(file_prt);
 
-			snprintf(buffer, RESPONSE_BUFFER_SIZE,
-					 "%s",
-					 STATUS_CREATED);
+			sprintf(buffer,
+					"%s",
+					STATUS_CREATED);
 		}
 		else
 		{
-			snprintf(buffer, RESPONSE_BUFFER_SIZE,
-					 "%s",
-					 STATUS_METHOD_NOT_ALLOWED);
+			sprintf(buffer,
+					"%s",
+					STATUS_METHOD_NOT_ALLOWED);
 		}
 	}
 	else
 	{
-		snprintf(buffer, RESPONSE_BUFFER_SIZE,
-				 "%s",
-				 STATUS_NOT_FOUND);
+		sprintf(buffer,
+				"%s",
+				STATUS_NOT_FOUND);
 	}
 }
 
@@ -303,14 +357,13 @@ void server_process_client(void *arg)
 
 	// request_print(&request);
 	// printf(CYAN "Response Buffer:\n" YELLOW "%s\n" RESET, response_buffer);
-	if (send(thread_args->client_fd, response_buffer, strlen(response_buffer), 0) == -1)
+
+	if (send(thread_args->client_fd, response_buffer, strlen(response_buffer) + request.size, 0) == -1)
 	{
 		printf(RED "Send failed: %s...\n" RESET, strerror(errno));
 	}
 	printf(GREEN "Message sent: %s:%d <----------\n" RESET, inet_ntoa(thread_args->client_addr.sin_addr), ntohs(thread_args->client_addr.sin_port));
-
 	close(thread_args->client_fd);
-	free(thread_args);
 }
 
 int main(int argc, char *argv[])
@@ -347,7 +400,7 @@ int main(int argc, char *argv[])
 		if (tpool_add_work(thread_pool, server_process_client, (void *)thread_args) == -1)
 		{
 			printf(RED "Failed to create pthread: %s\n" RESET, strerror(errno));
-			close(thread_args->client_fd);
+			free(thread_args);
 			free(thread_args_ptr);
 		}
 	}
