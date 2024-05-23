@@ -1,3 +1,0 @@
-Test file content.
-
-End of the text file.

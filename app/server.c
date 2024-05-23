@@ -362,7 +362,7 @@ void server_process_client(void *arg)
 	{
 		printf(RED "Send failed: %s...\n" RESET, strerror(errno));
 	}
-	printf(GREEN "Message sent: %s:%d <----------\n" RESET, inet_ntoa(thread_args->client_addr.sin_addr), ntohs(thread_args->client_addr.sin_port));
+	// printf(GREEN "Message sent: %s:%d <----------\n" RESET, inet_ntoa(thread_args->client_addr.sin_addr), ntohs(thread_args->client_addr.sin_port));
 	close(thread_args->client_fd);
 }
 
@@ -395,7 +395,7 @@ int main(int argc, char *argv[])
 		{
 			printf(RED "Client connection failed: %s \n" RESET, strerror(errno));
 		}
-		printf(CYAN "Client connected: %s:%d <----------\n" RESET, inet_ntoa(thread_args->client_addr.sin_addr), ntohs(thread_args->client_addr.sin_port));
+		// printf(CYAN "Client connected: %s:%d <----------\n" RESET, inet_ntoa(thread_args->client_addr.sin_addr), ntohs(thread_args->client_addr.sin_port));
 
 		if (tpool_add_work(thread_pool, server_process_client, (void *)thread_args) == -1)
 		{

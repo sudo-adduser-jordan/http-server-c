@@ -33,3 +33,6 @@ oha  http://localhost:4221/test.txt -n 1000
 
 
 curl -v -X GET http://localhost:4221/echo/strawberry -H "Accept-Encoding: gzip"
+
+
+this is the only repository of this project that can pass an oha test without crashing
