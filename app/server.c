@@ -349,14 +349,14 @@ int server_listen()
 	return server_fd;
 }
 #elif _WIN32
-int server_listen()
+SOCKET server_listen()
 {
 	WSADATA wsaData;
 	int ierror = WSAStartup(MAKEWORD(2, 2), &wsaData);
 	if (ierror != 0)
 	{
 		printf("WSAStartup failed with error: %d\n", ierror);
-		return 1;
+		return C_ERR;
 	}
 
 	SOCKET ListenSocket = socket(AF_INET, SOCK_STREAM, 0);
@@ -364,30 +364,28 @@ int server_listen()
 	{
 		printf("socket failed with error: %ld\n", WSAGetLastError());
 		WSACleanup();
-		return 1;
+		return C_ERR;
 	}
 
 	struct sockaddr_in addr;
 	addr.sin_family = AF_INET;
-	addr.sin_addr.s_addr = 0;
-	addr.sin_port = htons(8080);
+	addr.sin_addr.s_addr = INADDR_ANY;
+	addr.sin_port = htons(PORT);
 
-	ierror = bind(ListenSocket, &addr, sizeof(addr));
-	if (ierror == SOCKET_ERROR)
+	if (bind(ListenSocket, &addr, sizeof(addr)) == SOCKET_ERROR)
 	{
 		printf("bind failed with error: %d\n", WSAGetLastError());
 		closesocket(ListenSocket);
 		WSACleanup();
-		return 1;
+		return C_ERR;
 	}
 
-	ierror = listen(ListenSocket, SOMAXCONN);
-	if (ierror == SOCKET_ERROR)
+	if (listen(ListenSocket, SOMAXCONN) == SOCKET_ERROR)
 	{
 		printf("listen failed with error: %d\n", WSAGetLastError());
 		closesocket(ListenSocket);
 		WSACleanup();
-		return 1;
+		return C_ERR;
 	}
 
 	return ListenSocket;
@@ -418,7 +416,11 @@ void server_process_client(void *arg)
 		printf(RED "Send failed: %s...\n" RESET, strerror(errno));
 	}
 	// printf(GREEN "Message sent: %s:%d <----------\n" RESET, inet_ntoa(thread_args->client_addr.sin_addr), ntohs(thread_args->client_addr.sin_port));
-	// close(thread_args->client_fd);
+#ifdef linux
+	close(thread_args->client_fd);
+#elif _WIN32
+	closesocket(thread_args->client_fd);
+#endif
 }
 
 int main(int argc, char *argv[])
@@ -461,7 +463,7 @@ int main(int argc, char *argv[])
 	printf(YELLOW "Killing threadpool...\n" RESET);
 	threadpool_destroy(thread_pool, 0);
 	printf(RED "Closing server socket...\n" RESET);
-	// close(server_fd);
+	close(server_fd);
 
 	return C_OK;
 }
