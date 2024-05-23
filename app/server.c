@@ -1,22 +1,35 @@
-#include <stdio.h>		// standard buffered input/output
-#include <stdlib.h>		// standard library definitions
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+// #include <zlib.h> // gzip compression
+#endif
+
+#ifdef linux
 #include <sys/socket.h> // internet protocol family
 #include <netinet/in.h> // internet address family
 #include <netinet/ip.h> // internet protocol family
 #include <arpa/inet.h>	// definitions for internet operations
-#include <string.h>		// string operations
-#include <errno.h>		// error return value
 #include <unistd.h>		// standard symbolic constants and types
 #include <pthread.h>	// threads
-#include <stdint.h>		// integer types
-#include <ctype.h>		// character types
 #include <dirent.h>		// format of directory entries
 #include <zlib.h>		// gzip compression
-
 #include "tpool.h"
+#endif
+
+#include "threadpool.h"
+#define SIZE 8192
+#define QUEUES 64
+
+#include <stdio.h>	// standard buffered input/output
+#include <stdlib.h> // standard library definitions
+#include <string.h> // string operations
+#include <errno.h>	// error return value
+#include <stdint.h> // integer types
+#include <ctype.h>	// character types
 #include "colors.h"
 
-#define MAX_THREADS 4
+// #define MAX_THREADS 4
 
 #define C_OK 0
 #define C_ERR 1
@@ -64,20 +77,13 @@ struct Request
 
 char *option_directory = NULL;
 
-int server_listen();
-void server_process_client(void *arg);
-void request_parse(char *buffer, struct Request *request);
-void request_print(const struct Request *request);
-void response_build(char *buffer, struct Request *request);
-int compressToGzip(const char *input, int inputSize, char *output, int outputSize);
-void strremove(char *s, const char *toremove);
-
 void strremove(char *s, const char *toremove)
 {
 	while ((s = strstr(s, toremove)))
 		memmove(s, s + strlen(toremove), 1 + strlen(s + strlen(toremove)));
 }
 
+#ifdef linux
 int compressToGzip(const char *input, int inputSize, char *output, int outputSize)
 {
 	z_stream zs = {0};
@@ -94,6 +100,7 @@ int compressToGzip(const char *input, int inputSize, char *output, int outputSiz
 	deflateEnd(&zs);
 	return zs.total_out;
 }
+#endif
 
 void request_print(const struct Request *request)
 {
@@ -202,28 +209,28 @@ void response_build(char *buffer, struct Request *request)
 	{
 		if (request->accept_encoding && strstr(request->accept_encoding, "gzip") != NULL)
 		{
-			strremove(request->path, "/echo/");
+			// strremove(request->path, "/echo/");
 
-			char body[BUFFER_SIZE];
-			int len = compressToGzip(request->path, strlen(request->path), body, 1024);
-			if (len < 0)
-			{
-				printf(RED "Compression failed: %s...\n" RESET, strerror(errno));
-			}
+			// char body[BUFFER_SIZE];
+			// int len = compressToGzip(request->path, strlen(request->path), body, 1024);
+			// if (len < 0)
+			// {
+			// 	printf(RED "Compression failed: %s...\n" RESET, strerror(errno));
+			// }
 
-			sprintf(buffer,
-					"%s%s%s%s%d\r\n\r\n",
-					STATUS_OK,
-					CONTENT_TYPE_TEXT,
-					CONTENT_ENCODING_GZIP,
-					CONTENT_LENGTH,
-					len);
+			// sprintf(buffer,
+			// 		"%s%s%s%s%d\r\n\r\n",
+			// 		STATUS_OK,
+			// 		CONTENT_TYPE_TEXT,
+			// 		CONTENT_ENCODING_GZIP,
+			// 		CONTENT_LENGTH,
+			// 		len);
 
-			memcpy(buffer + strlen(buffer), body, len);
-			request->size = len;
-		}
-		else
-		{
+			// memcpy(buffer + strlen(buffer), body, len);
+			// request->size = len;
+			// }
+			// else
+			// {
 			strremove(request->path, "/echo/");
 			sprintf(buffer,
 					"%s%s%s%zd\r\n\r\n%s\r\n",
@@ -232,76 +239,78 @@ void response_build(char *buffer, struct Request *request)
 					CONTENT_LENGTH,
 					strlen(request->path),
 					request->path);
+			// }
 		}
-	}
-	else if (strstr(request->path, "/files/") != NULL)
-	{
-
-		if (strstr(request->method, "GET") != NULL) // GET
+		else if (strstr(request->path, "/files/") != NULL)
 		{
-			char filepath[1024] = {0};
-			request->path++; // move pointer forward one
-			strcat(filepath, option_directory);
-			strcat(filepath, request->path);
-			strremove(filepath, "files/");
 
-			FILE *file_ptr = fopen(filepath, "r");
-			if (file_ptr != NULL)
+			if (strstr(request->method, "GET") != NULL) // GET
 			{
-				fseek(file_ptr, 0, SEEK_END);
-				int size = ftell(file_ptr);
-				char data[1000] = {0};
-				fseek(file_ptr, 0, SEEK_SET);
-				fread(data, sizeof(char), size, file_ptr);
-				fclose(file_ptr);
+				char filepath[1024] = {0};
+				request->path++; // move pointer forward one
+				strcat(filepath, option_directory);
+				strcat(filepath, request->path);
+				strremove(filepath, "files/");
+
+				FILE *file_ptr = fopen(filepath, "r");
+				if (file_ptr != NULL)
+				{
+					fseek(file_ptr, 0, SEEK_END);
+					int size = ftell(file_ptr);
+					char data[1000] = {0};
+					fseek(file_ptr, 0, SEEK_SET);
+					fread(data, sizeof(char), size, file_ptr);
+					fclose(file_ptr);
+
+					sprintf(buffer,
+							"%s%s%s%d\r\n\r\n%s\r\n",
+							STATUS_OK,
+							CONTENT_TYPE_FILE,
+							CONTENT_LENGTH,
+							size,
+							data);
+				}
+				else
+				{
+					sprintf(buffer,
+							"%s",
+							STATUS_NOT_FOUND);
+				}
+			}
+			else if (strstr(request->method, "POST") != NULL) // POST
+			{
+				char filepath[1024] = {0};
+				request->path++; // move pointer forward one
+				strcat(filepath, option_directory);
+				strcat(filepath, request->path);
+				strremove(filepath, "files/");
+
+				FILE *file_prt;
+				file_prt = fopen(filepath, "w");
+				fprintf(file_prt, request->body);
+				fclose(file_prt);
 
 				sprintf(buffer,
-						"%s%s%s%d\r\n\r\n%s\r\n",
-						STATUS_OK,
-						CONTENT_TYPE_FILE,
-						CONTENT_LENGTH,
-						size,
-						data);
+						"%s",
+						STATUS_CREATED);
 			}
 			else
 			{
 				sprintf(buffer,
 						"%s",
-						STATUS_NOT_FOUND);
+						STATUS_METHOD_NOT_ALLOWED);
 			}
-		}
-		else if (strstr(request->method, "POST") != NULL) // POST
-		{
-			char filepath[1024] = {0};
-			request->path++; // move pointer forward one
-			strcat(filepath, option_directory);
-			strcat(filepath, request->path);
-			strremove(filepath, "files/");
-
-			FILE *file_prt;
-			file_prt = fopen(filepath, "w");
-			fprintf(file_prt, request->body);
-			fclose(file_prt);
-
-			sprintf(buffer,
-					"%s",
-					STATUS_CREATED);
 		}
 		else
 		{
 			sprintf(buffer,
 					"%s",
-					STATUS_METHOD_NOT_ALLOWED);
+					STATUS_NOT_FOUND);
 		}
-	}
-	else
-	{
-		sprintf(buffer,
-				"%s",
-				STATUS_NOT_FOUND);
 	}
 }
 
+#ifdef linux
 int server_listen()
 {
 	int server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -310,6 +319,7 @@ int server_listen()
 		printf(RED "Socket creation failed: %s...\n" RESET, strerror(errno));
 		return C_ERR;
 	}
+
 	int reuse = 1;
 	if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
 	{
@@ -338,6 +348,138 @@ int server_listen()
 
 	return server_fd;
 }
+#elif _WIN32
+int server_listen()
+{
+
+	WSADATA wsaData;
+	int iResult;
+
+	SOCKET ListenSocket = INVALID_SOCKET;
+	SOCKET ClientSocket = INVALID_SOCKET;
+
+	struct addrinfo *result = NULL;
+	struct addrinfo hints;
+
+	int iSendResult;
+	char recvbuf[BUFFER_SIZE];
+	int recvbuflen = BUFFER_SIZE;
+
+	// Initialize Winsock
+	iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
+	if (iResult != 0)
+	{
+		printf("WSAStartup failed with error: %d\n", iResult);
+		return 1;
+	}
+
+	ZeroMemory(&hints, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_protocol = IPPROTO_TCP;
+	hints.ai_flags = AI_PASSIVE;
+
+	// Resolve the server address and port
+	iResult = getaddrinfo(NULL, 4221, &hints, &result);
+	if (iResult != 0)
+	{
+		printf("getaddrinfo failed with error: %d\n", iResult);
+		WSACleanup();
+		return 1;
+	}
+
+	// Create a SOCKET for the server to listen for client connections.
+	ListenSocket = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+	if (ListenSocket == INVALID_SOCKET)
+	{
+		printf("socket failed with error: %ld\n", WSAGetLastError());
+		freeaddrinfo(result);
+		WSACleanup();
+		return 1;
+	}
+
+	// Setup the TCP listening socket
+	iResult = bind(ListenSocket, result->ai_addr, (int)result->ai_addrlen);
+	if (iResult == SOCKET_ERROR)
+	{
+		printf("bind failed with error: %d\n", WSAGetLastError());
+		freeaddrinfo(result);
+		closesocket(ListenSocket);
+		WSACleanup();
+		return 1;
+	}
+
+	freeaddrinfo(result);
+
+	iResult = listen(ListenSocket, SOMAXCONN);
+	if (iResult == SOCKET_ERROR)
+	{
+		printf("listen failed with error: %d\n", WSAGetLastError());
+		closesocket(ListenSocket);
+		WSACleanup();
+		return 1;
+	}
+
+	// Accept a client socket
+	ClientSocket = accept(ListenSocket, NULL, NULL);
+	if (ClientSocket == INVALID_SOCKET)
+	{
+		printf("accept failed with error: %d\n", WSAGetLastError());
+		closesocket(ListenSocket);
+		WSACleanup();
+		return 1;
+	}
+
+	// No longer need server socket
+	closesocket(ListenSocket);
+
+	// Receive until the peer shuts down the connection
+	do
+	{
+
+		iResult = recv(ClientSocket, recvbuf, recvbuflen, 0);
+		if (iResult > 0)
+		{
+			printf("Bytes received: %d\n", iResult);
+
+			// Echo the buffer back to the sender
+			iSendResult = send(ClientSocket, recvbuf, iResult, 0);
+			if (iSendResult == SOCKET_ERROR)
+			{
+				printf("send failed with error: %d\n", WSAGetLastError());
+				closesocket(ClientSocket);
+				WSACleanup();
+				return 1;
+			}
+			printf("Bytes sent: %d\n", iSendResult);
+		}
+		else if (iResult == 0)
+			printf("Connection closing...\n");
+		else
+		{
+			printf("recv failed with error: %d\n", WSAGetLastError());
+			closesocket(ClientSocket);
+			WSACleanup();
+			return 1;
+		}
+
+	} while (iResult > 0);
+
+	// shutdown the connection since we're done
+	iResult = shutdown(ClientSocket, SD_SEND);
+	if (iResult == SOCKET_ERROR)
+	{
+		printf("shutdown failed with error: %d\n", WSAGetLastError());
+		closesocket(ClientSocket);
+		WSACleanup();
+		return 1;
+	}
+
+	// cleanup
+	closesocket(ClientSocket);
+	WSACleanup();
+}
+#endif
 
 void server_process_client(void *arg)
 {
@@ -363,7 +505,7 @@ void server_process_client(void *arg)
 		printf(RED "Send failed: %s...\n" RESET, strerror(errno));
 	}
 	// printf(GREEN "Message sent: %s:%d <----------\n" RESET, inet_ntoa(thread_args->client_addr.sin_addr), ntohs(thread_args->client_addr.sin_port));
-	close(thread_args->client_fd);
+	// close(thread_args->client_fd);
 }
 
 int main(int argc, char *argv[])
@@ -380,37 +522,35 @@ int main(int argc, char *argv[])
 
 	setbuf(stdout, NULL);
 
-	threadpool thread_pool = tpool_init(MAX_THREADS);
+	threadpool_t *thread_pool = threadpool_create(MAX_THREADS, SIZE, 0);
 	printf(GREEN "Thread pool created: %d threads\n" RESET, MAX_THREADS);
 
-	int server_fd = server_listen();
-	for (;;)
-	{
-		void *thread_args_ptr = malloc(sizeof(struct ThreadArgs));
-		struct ThreadArgs *thread_args = (struct ThreadArgs *)(thread_args_ptr);
+	// int server_fd = server_listen();
+	// for (;;)
+	// {
+	// 	void *thread_args_ptr = malloc(sizeof(struct ThreadArgs));
+	// 	struct ThreadArgs *thread_args = (struct ThreadArgs *)(thread_args_ptr);
 
-		socklen_t client_addr_len = sizeof(thread_args->client_addr);
-		thread_args->client_fd = accept(server_fd, (struct sockaddr *)&thread_args->client_addr, &client_addr_len);
-		if (thread_args->client_fd == -1)
-		{
-			printf(RED "Client connection failed: %s \n" RESET, strerror(errno));
-		}
-		// printf(CYAN "Client connected: %s:%d <----------\n" RESET, inet_ntoa(thread_args->client_addr.sin_addr), ntohs(thread_args->client_addr.sin_port));
+	// 	socklen_t client_addr_len = sizeof(thread_args->client_addr);
+	// 	thread_args->client_fd = accept(server_fd, (struct sockaddr *)&thread_args->client_addr, &client_addr_len);
+	// 	if (thread_args->client_fd == -1)
+	// 	{
+	// 		printf(RED "Client connection failed: %s \n" RESET, strerror(errno));
+	// 	}
+	// 	// printf(CYAN "Client connected: %s:%d <----------\n" RESET, inet_ntoa(thread_args->client_addr.sin_addr), ntohs(thread_args->client_addr.sin_port));
 
-		if (tpool_add_work(thread_pool, server_process_client, (void *)thread_args) == -1)
-		{
-			printf(RED "Failed to create pthread: %s\n" RESET, strerror(errno));
-			free(thread_args);
-			free(thread_args_ptr);
-		}
-	}
+	// 	if (threadpool_add(thread_pool, server_process_client, (void *)thread_args, 0) != 0)
+	// 	{
+	// 		printf(RED "Failed to create thread: %s\n" RESET, strerror(errno));
+	// 		free(thread_args);
+	// 		free(thread_args_ptr);
+	// 	}
+	// }
 
-	printf(YELLOW "Waiting for thread pool work to complete..." RESET);
-	tpool_wait(thread_pool);
-	printf(RED "Killing threadpool..." RESET);
-	tpool_destroy(thread_pool);
-	printf(RED "Closing server socket..." RESET);
-	close(server_fd);
+	printf(YELLOW "Killing threadpool...\n" RESET);
+	threadpool_destroy(thread_pool, 0);
+	printf(RED "Closing server socket...\n" RESET);
+	// close(server_fd);
 
 	return C_OK;
 }
