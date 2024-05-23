@@ -14,7 +14,6 @@
 #include <pthread.h>	// threads
 #include <dirent.h>		// format of directory entries
 #include <zlib.h>		// gzip compression
-#include "tpool.h"
 #endif
 
 #include "threadpool.h"
@@ -209,28 +208,7 @@ void response_build(char *buffer, struct Request *request)
 	{
 		if (request->accept_encoding && strstr(request->accept_encoding, "gzip") != NULL)
 		{
-			// strremove(request->path, "/echo/");
-
-			// char body[BUFFER_SIZE];
-			// int len = compressToGzip(request->path, strlen(request->path), body, 1024);
-			// if (len < 0)
-			// {
-			// 	printf(RED "Compression failed: %s...\n" RESET, strerror(errno));
-			// }
-
-			// sprintf(buffer,
-			// 		"%s%s%s%s%d\r\n\r\n",
-			// 		STATUS_OK,
-			// 		CONTENT_TYPE_TEXT,
-			// 		CONTENT_ENCODING_GZIP,
-			// 		CONTENT_LENGTH,
-			// 		len);
-
-			// memcpy(buffer + strlen(buffer), body, len);
-			// request->size = len;
-			// }
-			// else
-			// {
+#ifdef _WIN32
 			strremove(request->path, "/echo/");
 			sprintf(buffer,
 					"%s%s%s%zd\r\n\r\n%s\r\n",
@@ -239,7 +217,39 @@ void response_build(char *buffer, struct Request *request)
 					CONTENT_LENGTH,
 					strlen(request->path),
 					request->path);
-			// }
+#elif linux
+			strremove(request->path, "/echo/");
+
+			char body[BUFFER_SIZE];
+			int len = compressToGzip(request->path, strlen(request->path), body, 1024);
+			if (len < 0)
+			{
+				printf(RED "Compression failed: %s...\n" RESET, strerror(errno));
+			}
+
+			sprintf(buffer,
+					"%s%s%s%s%d\r\n\r\n",
+					STATUS_OK,
+					CONTENT_TYPE_TEXT,
+					CONTENT_ENCODING_GZIP,
+					CONTENT_LENGTH,
+					len);
+
+			memcpy(buffer + strlen(buffer), body, len);
+			request->size = len;
+		}
+		else
+		{
+			strremove(request->path, "/echo/");
+			sprintf(buffer,
+					"%s%s%s%zd\r\n\r\n%s\r\n",
+					STATUS_OK,
+					CONTENT_TYPE_TEXT,
+					CONTENT_LENGTH,
+					strlen(request->path),
+					request->path);
+		}
+#endif
 		}
 		else if (strstr(request->path, "/files/") != NULL)
 		{
