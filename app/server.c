@@ -2,6 +2,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <io.h>
 #endif
 
 #ifdef linux
@@ -9,9 +10,9 @@
 #include <netinet/in.h> // internet address family
 #include <netinet/ip.h> // internet protocol family
 #include <arpa/inet.h>	// definitions for internet operations
-#include <unistd.h>		// standard symbolic constants and types
 #include <pthread.h>	// threads
 #include <dirent.h>		// format of directory entries
+#include <unistd.h>		// standard symbolic constants and types
 #endif
 
 #include <zlib.h> // gzip compression
@@ -81,7 +82,6 @@ void strremove(char *s, const char *toremove)
 		memmove(s, s + strlen(toremove), 1 + strlen(s + strlen(toremove)));
 }
 
-#ifdef linux
 int compressToGzip(const char *input, int inputSize, char *output, int outputSize)
 {
 	z_stream zs = {0};
@@ -98,7 +98,6 @@ int compressToGzip(const char *input, int inputSize, char *output, int outputSiz
 	deflateEnd(&zs);
 	return zs.total_out;
 }
-#endif
 
 void request_print(const struct Request *request)
 {
@@ -207,16 +206,6 @@ void response_build(char *buffer, struct Request *request)
 	{
 		if (request->accept_encoding && strstr(request->accept_encoding, "gzip") != NULL)
 		{
-#ifdef _WIN32
-			strremove(request->path, "/echo/");
-			sprintf(buffer,
-					"%s%s%s%zd\r\n\r\n%s\r\n",
-					STATUS_OK,
-					CONTENT_TYPE_TEXT,
-					CONTENT_LENGTH,
-					strlen(request->path),
-					request->path);
-#elif linux
 			strremove(request->path, "/echo/");
 
 			char body[BUFFER_SIZE];
@@ -248,75 +237,74 @@ void response_build(char *buffer, struct Request *request)
 					strlen(request->path),
 					request->path);
 		}
-#endif
-		}
-		else if (strstr(request->path, "/files/") != NULL)
+	}
+	else if (strstr(request->path, "/files/") != NULL)
+	{
+
+		if (strstr(request->method, "GET") != NULL) // GET
 		{
+			char filepath[1024] = {0};
+			request->path++; // move pointer forward one
+			strcat(filepath, option_directory);
+			strcat(filepath, request->path);
+			strremove(filepath, "files/");
 
-			if (strstr(request->method, "GET") != NULL) // GET
+			FILE *file_ptr = fopen(filepath, "r");
+			if (file_ptr != NULL)
 			{
-				char filepath[1024] = {0};
-				request->path++; // move pointer forward one
-				strcat(filepath, option_directory);
-				strcat(filepath, request->path);
-				strremove(filepath, "files/");
-
-				FILE *file_ptr = fopen(filepath, "r");
-				if (file_ptr != NULL)
-				{
-					fseek(file_ptr, 0, SEEK_END);
-					int size = ftell(file_ptr);
-					char data[1000] = {0};
-					fseek(file_ptr, 0, SEEK_SET);
-					fread(data, sizeof(char), size, file_ptr);
-					fclose(file_ptr);
-
-					sprintf(buffer,
-							"%s%s%s%d\r\n\r\n%s\r\n",
-							STATUS_OK,
-							CONTENT_TYPE_FILE,
-							CONTENT_LENGTH,
-							size,
-							data);
-				}
-				else
-				{
-					sprintf(buffer,
-							"%s",
-							STATUS_NOT_FOUND);
-				}
-			}
-			else if (strstr(request->method, "POST") != NULL) // POST
-			{
-				char filepath[1024] = {0};
-				request->path++; // move pointer forward one
-				strcat(filepath, option_directory);
-				strcat(filepath, request->path);
-				strremove(filepath, "files/");
-
-				FILE *file_prt;
-				file_prt = fopen(filepath, "w");
-				fprintf(file_prt, request->body);
-				fclose(file_prt);
+				fseek(file_ptr, 0, SEEK_END);
+				int size = ftell(file_ptr);
+				char data[1000] = {0};
+				fseek(file_ptr, 0, SEEK_SET);
+				fread(data, sizeof(char), size, file_ptr);
+				fclose(file_ptr);
 
 				sprintf(buffer,
-						"%s",
-						STATUS_CREATED);
+						"%s%s%s%d\r\n\r\n%s\r\n",
+						STATUS_OK,
+						CONTENT_TYPE_FILE,
+						CONTENT_LENGTH,
+						size,
+						data);
 			}
 			else
 			{
 				sprintf(buffer,
 						"%s",
-						STATUS_METHOD_NOT_ALLOWED);
+						STATUS_NOT_FOUND);
 			}
+		}
+		else if (strstr(request->method, "POST") != NULL) // POST
+		{
+			char filepath[1024] = {0};
+			request->path++; // move pointer forward one
+			strcat(filepath, option_directory);
+			strcat(filepath, request->path);
+			strremove(filepath, "files/");
+
+			FILE *file_prt;
+			file_prt = fopen(filepath, "w");
+			fprintf(file_prt, request->body);
+			fclose(file_prt);
+
+			sprintf(buffer,
+					"%s",
+					STATUS_CREATED);
 		}
 		else
 		{
 			sprintf(buffer,
 					"%s",
-					STATUS_NOT_FOUND);
+					STATUS_METHOD_NOT_ALLOWED);
 		}
 	}
+	else
+	{
+		sprintf(buffer,
+				"%s",
+				STATUS_NOT_FOUND);
+	}
+}
 }
 
 #ifdef linux
