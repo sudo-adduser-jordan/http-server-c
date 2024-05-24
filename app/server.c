@@ -2,7 +2,6 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
-// #include <zlib.h> // gzip compression
 #endif
 
 #ifdef linux
@@ -13,9 +12,9 @@
 #include <unistd.h>		// standard symbolic constants and types
 #include <pthread.h>	// threads
 #include <dirent.h>		// format of directory entries
-#include <zlib.h>		// gzip compression
 #endif
 
+#include <zlib.h> // gzip compression
 #include "threadpool.h"
 #define SIZE 8192
 #define QUEUES 64
@@ -372,7 +371,7 @@ SOCKET server_listen()
 	SOCKET ListenSocket = socket(AF_INET, SOCK_STREAM, 0);
 	if (ListenSocket == INVALID_SOCKET)
 	{
-		printf("socket failed with error: %ld\n", WSAGetLastError());
+		printf("socket failed with error: %d\n", WSAGetLastError());
 		WSACleanup();
 		return C_ERR;
 	}
@@ -382,7 +381,7 @@ SOCKET server_listen()
 	addr.sin_addr.s_addr = INADDR_ANY;
 	addr.sin_port = htons(PORT);
 
-	if (bind(ListenSocket, &addr, sizeof(addr)) == SOCKET_ERROR)
+	if (bind(ListenSocket, (const struct sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR)
 	{
 		printf("bind failed with error: %d\n", WSAGetLastError());
 		closesocket(ListenSocket);
@@ -473,7 +472,10 @@ int main(int argc, char *argv[])
 	printf(YELLOW "Killing threadpool...\n" RESET);
 	threadpool_destroy(thread_pool, 0);
 	printf(RED "Closing server socket...\n" RESET);
+#ifdef linux
 	close(server_fd);
-
+#elif _WIN32
+	closesocket(server_fd);
+#endif
 	return C_OK;
 }

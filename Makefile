@@ -1,7 +1,7 @@
 all: win
 
 win:
-	gcc app/*.c -o bin/http-server.exe -Wall -lz -lwsock32 -lWs2_32
+	gcc app/*.c -o bin/http-server.exe -Wall -lwsock32 -lWs2_32 -lz -L"C:\Program Files (x86)\GnuWin32\bin\zlib1.dll"
 	./bin/http-server.exe
 
 linux:
