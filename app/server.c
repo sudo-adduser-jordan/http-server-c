@@ -305,7 +305,6 @@ void response_build(char *buffer, struct Request *request)
 				STATUS_NOT_FOUND);
 	}
 }
-}
 
 #ifdef linux
 int server_listen()
